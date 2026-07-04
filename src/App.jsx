@@ -244,6 +244,8 @@ export default function GarderobeApp() {
   const [stijl, setStijl] = useState("Modern preppy");
   const [weer, setWeer] = useState([]);
   const [weerBron, setWeerBron] = useState("demo");
+  const [weerTijd, setWeerTijd] = useState(null);
+  const [weerLaadt, setWeerLaadt] = useState(false);
   const [plan, setPlan] = useState([]);
   const [tab, setTab] = useState("planner");
   const [geladen, setGeladen] = useState(false);
@@ -294,11 +296,12 @@ export default function GarderobeApp() {
   }, [items, stijl, plan, geladen]);
 
   async function haalWeerOp() {
+    setWeerLaadt(true);
     try {
       const res = await fetch(
         "https://api.open-meteo.com/v1/forecast?latitude=52.37&longitude=4.89&daily=temperature_2m_max,precipitation_probability_max&forecast_days=5&timezone=auto"
       );
-      if (!res.ok) throw new Error("geen verbinding");
+      if (!res.ok) throw new Error(`Open-Meteo antwoordde met status ${res.status}`);
       const d = await res.json();
       const dagen = d.daily.time.map((t, i) => {
         const dt = new Date(t);
@@ -312,9 +315,12 @@ export default function GarderobeApp() {
       setWeer(dagen);
       setWeerBron("live");
     } catch (e) {
+      console.error("Live weer ophalen mislukt, demo-weer actief:", e);
       setWeer(demoWeer());
       setWeerBron("demo");
     }
+    setWeerTijd(new Date());
+    setWeerLaadt(false);
   }
 
   function maakPlan() {
@@ -506,13 +512,44 @@ export default function GarderobeApp() {
               </button>
               <button
                 onClick={haalWeerOp}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
+                disabled={weerLaadt}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm disabled:opacity-50"
                 style={{ border: `1.5px solid ${KLEUREN.lijn}`, background: KLEUREN.wit }}
-                title="Weer verversen"
+                title="Actuele voorspelling opnieuw ophalen"
               >
-                <RefreshCw size={15} /> Weer {weerBron === "demo" ? "(demo)" : "(live)"}
+                <RefreshCw size={15} className={weerLaadt ? "animate-spin" : ""} />
+                {weerLaadt
+                  ? "Weer ophalen…"
+                  : `Weer verversen${weerTijd ? ` · ${weerTijd.getHours()}:${String(weerTijd.getMinutes()).padStart(2, "0")}` : ""}`}
               </button>
             </div>
+
+            {weerBron === "demo" && weerTijd && (
+              <p className="text-sm mb-4 rounded-lg px-3 py-2" style={{ background: "#F9E9E4", color: KLEUREN.bordeaux }}>
+                Live weer ophalen is niet gelukt — je ziet nu willekeurig demo-weer.
+                Controleer je internetverbinding en de foutmelding in de browserconsole (F12).
+              </p>
+            )}
+
+            {items.length > 0 && weer.length > 0 && (
+              <div className="mb-4">
+                <p className="text-xs uppercase tracking-widest mb-1.5" style={{ color: KLEUREN.grijs, letterSpacing: "0.15em" }}>
+                  Actuele voorspelling {weerBron === "live" ? "· live via Open-Meteo" : "· demo"}
+                </p>
+                <div className="grid grid-cols-5 gap-2">
+                  {weer.map((d) => (
+                    <div key={d.datum} className="rounded-lg p-3 text-center" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                      <p className="text-xs capitalize mb-1" style={{ color: KLEUREN.grijs }}>{dagLabel(d.datum)}</p>
+                      <div className="flex items-center justify-center gap-1">
+                        <WeerIcoon regenkans={d.regenkans} temp={d.temp} />
+                        <span className="font-semibold">{d.temp}°</span>
+                      </div>
+                      <p className="text-xs mt-1" style={{ color: KLEUREN.grijs }}>{d.regenkans}% regen</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {!items.length && (
               <div className="rounded-xl p-8 text-center" style={{ background: KLEUREN.wit, border: `1.5px dashed ${KLEUREN.lijn}` }}>
@@ -521,21 +558,6 @@ export default function GarderobeApp() {
                 <button onClick={laadVoorbeeld} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ background: KLEUREN.bordeaux, color: KLEUREN.ivoor }}>
                   Voorbeeldgarderobe laden
                 </button>
-              </div>
-            )}
-
-            {items.length > 0 && !plan.length && (
-              <div className="grid grid-cols-5 gap-2 mb-4">
-                {weer.map((d) => (
-                  <div key={d.datum} className="rounded-lg p-3 text-center" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
-                    <p className="text-xs capitalize mb-1" style={{ color: KLEUREN.grijs }}>{d.dag}</p>
-                    <div className="flex items-center justify-center gap-1">
-                      <WeerIcoon regenkans={d.regenkans} temp={d.temp} />
-                      <span className="font-semibold">{d.temp}°</span>
-                    </div>
-                    <p className="text-xs mt-1" style={{ color: KLEUREN.grijs }}>{d.regenkans}% regen</p>
-                  </div>
-                ))}
               </div>
             )}
 
