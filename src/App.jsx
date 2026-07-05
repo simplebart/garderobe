@@ -13,19 +13,61 @@ const KLEUREN = {
   lijn: "#E3DFD4",
 };
 
+// ---------- Temperatuurbanden ----------
+// Elk kledingstuk krijgt één of meer banden waarin het draagbaar is.
+// Voorbeeld: wollen pantalon = "< 0°" + "0–10°" + "10–15°" + "15–20°",
+// maar niet de banden daarboven — boven de 20° wordt hij te warm.
+const TEMP_BANDEN = [
+  { id: "b_min0", label: "< 0°", min: -Infinity, max: 0 },
+  { id: "b_0", label: "0–10°", min: 0, max: 10 },
+  { id: "b_10", label: "10–15°", min: 10, max: 15 },
+  { id: "b_15", label: "15–20°", min: 15, max: 20 },
+  { id: "b_20", label: "20–25°", min: 20, max: 25 },
+  { id: "b_25", label: "25–30°", min: 25, max: 30 },
+  { id: "b_30", label: "30°+", min: 30, max: Infinity },
+];
+const ALLE_BANDEN = TEMP_BANDEN.map((b) => b.id);
+const bandVanTemp = (t) => (TEMP_BANDEN.find((b) => t >= b.min && t < b.max) || TEMP_BANDEN[2]).id;
+
+// Migratie van de oude grove klassen (koud/mild/warm/alle) naar banden,
+// zodat bestaande items niets merken van de overstap.
+const WARMTE_NAAR_BANDEN = {
+  koud: ["b_min0", "b_0"],
+  mild: ["b_10", "b_15"],
+  warm: ["b_20", "b_25", "b_30"],
+  alle: ALLE_BANDEN,
+};
+
+// Leesbare samenvatting: aaneengesloten banden worden samengevoegd,
+// dus b.v. "< 0°" t/m "15–20°" wordt gewoon "tot 20°".
+function tempTekst(banden) {
+  if (!banden?.length || banden.length === TEMP_BANDEN.length) return "alle temperaturen";
+  const gekozen = TEMP_BANDEN.map((b, i) => ({ ...b, i })).filter((b) => banden.includes(b.id));
+  const segmenten = [];
+  let start = null, vorige = null;
+  for (const b of gekozen) {
+    if (start === null) { start = b; vorige = b; continue; }
+    if (b.i === vorige.i + 1) { vorige = b; continue; }
+    segmenten.push([start, vorige]);
+    start = b; vorige = b;
+  }
+  if (start) segmenten.push([start, vorige]);
+  return segmenten
+    .map(([a, z]) => {
+      if (a.i === 0 && z.i === TEMP_BANDEN.length - 1) return "alle temperaturen";
+      if (a.i === 0) return `tot ${z.max}°`;
+      if (z.i === TEMP_BANDEN.length - 1) return `vanaf ${a.min}°`;
+      return `${a.min}–${z.max}°`;
+    })
+    .join(" · ");
+}
+
 const CATEGORIEEN = [
   { id: "top", label: "Bovenstuk" },
   { id: "broek", label: "Broek / rok" },
   { id: "schoenen", label: "Schoenen" },
   { id: "jas", label: "Jas" },
   { id: "accessoire", label: "Accessoire" },
-];
-
-const WARMTE = [
-  { id: "alle", label: "Alle temperaturen" },
-  { id: "warm", label: "Warm (19° en hoger)" },
-  { id: "mild", label: "Mild (10–19°)" },
-  { id: "koud", label: "Koud (onder 10°)" },
 ];
 
 const PASVORMEN = [
@@ -105,11 +147,14 @@ const SEIZOEN_TREFWOORDEN = [
   { woorden: ["zonnebril", "pet", "cap", "strohoed"], seizoenen: ["lente", "zomer"] },
 ];
 
-const WARMTE_NAAR_SEIZOEN = {
-  koud: ["herfst", "winter"],
-  mild: ["lente", "herfst"],
-  warm: ["zomer"],
-  alle: ["lente", "zomer", "herfst", "winter"],
+const BAND_NAAR_SEIZOEN = {
+  b_min0: ["winter"],
+  b_0: ["herfst", "winter"],
+  b_10: ["lente", "herfst"],
+  b_15: ["lente", "herfst"],
+  b_20: ["lente", "zomer"],
+  b_25: ["zomer"],
+  b_30: ["zomer"],
 };
 
 function afleidSeizoenen(item) {
@@ -120,8 +165,11 @@ function afleidSeizoenen(item) {
       regel.seizoenen.forEach((s) => gevonden.add(s));
     }
   }
-  if (gevonden.size) return SEIZOENEN.map((s) => s.id).filter((id) => gevonden.has(id));
-  return WARMTE_NAAR_SEIZOEN[item.warmte] || WARMTE_NAAR_SEIZOEN.alle;
+  if (!gevonden.size) {
+    (item.tempBanden || ALLE_BANDEN).forEach((b) => (BAND_NAAR_SEIZOEN[b] || []).forEach((s) => gevonden.add(s)));
+  }
+  const lijst = SEIZOENEN.map((s) => s.id).filter((id) => gevonden.has(id));
+  return lijst.length ? lijst : SEIZOENEN.map((s) => s.id);
 }
 
 const seizoenTekst = (lijst) => {
@@ -132,7 +180,6 @@ const seizoenTekst = (lijst) => {
 // ---------- Hulpfuncties ----------
 const nieuwId = () => Math.random().toString(36).slice(2, 10);
 
-const warmteVanTemp = (t) => (t >= 19 ? "warm" : t >= 10 ? "mild" : "koud");
 
 const vandaagISO = () => new Date().toISOString().slice(0, 10);
 const dagLabel = (datumISO) => {
@@ -200,6 +247,11 @@ function normaliseerItem(it) {
     foto: null,
     ...it,
   };
+  // Oude items met een grove warmteklasse krijgen automatisch de
+  // bijbehorende temperatuurbanden; niets hoeft opnieuw ingevoerd.
+  if (!Array.isArray(basis.tempBanden) || !basis.tempBanden.length) {
+    basis.tempBanden = WARMTE_NAAR_BANDEN[basis.warmte] || ALLE_BANDEN;
+  }
   if (!Array.isArray(basis.seizoenen) || !basis.seizoenen.length) {
     basis.seizoenen = afleidSeizoenen(basis);
   }
@@ -218,7 +270,7 @@ const kleurenBotsen = (a, b) => {
 
 // ---------- Outfitgenerator ----------
 function genereerDag(items, dag, stijl, vermijden = new Set()) {
-  const behoefte = warmteVanTemp(dag.temp);
+  const dagBand = bandVanTemp(dag.temp);
   const regent = dag.regenkans >= 50;
   const vandaag = new Set();
 
@@ -227,7 +279,7 @@ function genereerDag(items, dag, stijl, vermijden = new Set()) {
       (it) =>
         it.categorie === categorie &&
         !it.vies &&
-        (it.warmte === "alle" || it.warmte === behoefte) &&
+        (it.tempBanden || ALLE_BANDEN).includes(dagBand) &&
         !vandaag.has(it.id) &&
         extraFilter(it)
     );
@@ -322,7 +374,7 @@ export default function GarderobeApp() {
   const [nieuweStijl, setNieuweStijl] = useState("");
   const [nieuw, setNieuw] = useState({
     naam: "", merk: "", categorie: "top", laag: "basis", pasvorm: "regular",
-    kleur: "navy", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 1, foto: null,
+    kleur: "navy", patroon: false, tempBanden: [...ALLE_BANDEN], stijl: "Modern preppy", maxDraag: 1, foto: null,
   });
   const eersteOpslag = useRef(true);
   const nieuwFotoInput = useRef(null);
@@ -498,6 +550,20 @@ export default function GarderobeApp() {
           : [...huidig, seizoen];
         // Minstens één seizoen laten staan, anders verdwijnt het item overal.
         return nieuwLijst.length ? { ...it, seizoenen: nieuwLijst } : it;
+      })
+    );
+  }
+
+  function wisselTempBand(itemId, band) {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId) return it;
+        const huidig = it.tempBanden || [...ALLE_BANDEN];
+        const nieuwLijst = huidig.includes(band)
+          ? huidig.filter((b) => b !== band)
+          : [...huidig, band];
+        // Minstens één band laten staan, anders kan het item nooit gekozen worden.
+        return nieuwLijst.length ? { ...it, tempBanden: nieuwLijst } : it;
       })
     );
   }
@@ -998,9 +1064,6 @@ export default function GarderobeApp() {
                 <select value={nieuw.pasvorm} onChange={(e) => setNieuw({ ...nieuw, pasvorm: e.target.value })} className="px-2 py-2 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
                   {PASVORMEN.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
-                <select value={nieuw.warmte} onChange={(e) => setNieuw({ ...nieuw, warmte: e.target.value })} className="px-2 py-2 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
-                  {WARMTE.map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
-                </select>
                 <select value={nieuw.stijl} onChange={(e) => setNieuw({ ...nieuw, stijl: e.target.value })} className="px-2 py-2 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
                   {stijlen.map((s) => <option key={s}>{s}</option>)}
                 </select>
@@ -1018,6 +1081,46 @@ export default function GarderobeApp() {
                   />
                   x dragen
                 </label>
+              </div>
+
+              {/* Temperatuurbanden: meerdere mogelijk, bijv. een pantalon
+                  voor alles tot 20° maar niet daarboven. */}
+              <p className="text-xs uppercase tracking-wide mb-1.5" style={{ color: KLEUREN.grijs }}>Draagbaar bij (meerdere mogelijk)</p>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {TEMP_BANDEN.map((b) => {
+                  const aan = nieuw.tempBanden.includes(b.id);
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() =>
+                        setNieuw((n) => {
+                          const lijst = aan ? n.tempBanden.filter((x) => x !== b.id) : [...n.tempBanden, b.id];
+                          return { ...n, tempBanden: lijst.length ? lijst : n.tempBanden };
+                        })
+                      }
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium"
+                      style={{
+                        background: aan ? KLEUREN.navy : KLEUREN.wit,
+                        color: aan ? KLEUREN.ivoor : KLEUREN.grijs,
+                        border: `1.5px solid ${aan ? KLEUREN.navy : KLEUREN.lijn}`,
+                      }}
+                    >
+                      {aan && <Check size={11} />}{b.label}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() =>
+                    setNieuw((n) => ({
+                      ...n,
+                      tempBanden: n.tempBanden.length === TEMP_BANDEN.length ? [...ALLE_BANDEN] : [...ALLE_BANDEN],
+                    }))
+                  }
+                  className="px-2.5 py-1.5 rounded-full text-xs"
+                  style={{ border: `1.5px dashed ${KLEUREN.lijn}`, color: KLEUREN.grijs }}
+                >
+                  Alles aan
+                </button>
               </div>
 
               {/* Kleurkeuze: grote klikbare vlakken mét naam, in plaats van een dropdown */}
@@ -1287,7 +1390,7 @@ export default function GarderobeApp() {
                               {` · ${it.stijl}`}
                             </span>
                             <span className="block text-xs capitalize" style={{ color: KLEUREN.groen }}>
-                              {seizoenTekst(it.seizoenen)}
+                              {seizoenTekst(it.seizoenen)} · {tempTekst(it.tempBanden)}
                             </span>
                           </span>
                           <span
@@ -1316,25 +1419,47 @@ export default function GarderobeApp() {
                           </button>
                           </div>
                           {bewerkSeizoenId === it.id && (
-                            <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
-                              <span className="text-xs mr-1" style={{ color: KLEUREN.grijs }}>Geschikt voor:</span>
-                              {SEIZOENEN.map((s) => {
-                                const aan = it.seizoenen?.includes(s.id);
-                                return (
-                                  <button
-                                    key={s.id}
-                                    onClick={() => wisselSeizoen(it.id, s.id)}
-                                    className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
-                                    style={{
-                                      background: aan ? KLEUREN.groen : KLEUREN.wit,
-                                      color: aan ? KLEUREN.ivoor : KLEUREN.grijs,
-                                      border: `1.5px solid ${aan ? KLEUREN.groen : KLEUREN.lijn}`,
-                                    }}
-                                  >
-                                    {aan && <Check size={11} />}{s.label}
-                                  </button>
-                                );
-                              })}
+                            <div className="mt-2 pt-2 space-y-2" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs mr-1" style={{ color: KLEUREN.grijs }}>Seizoen:</span>
+                                {SEIZOENEN.map((s) => {
+                                  const aan = it.seizoenen?.includes(s.id);
+                                  return (
+                                    <button
+                                      key={s.id}
+                                      onClick={() => wisselSeizoen(it.id, s.id)}
+                                      className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
+                                      style={{
+                                        background: aan ? KLEUREN.groen : KLEUREN.wit,
+                                        color: aan ? KLEUREN.ivoor : KLEUREN.grijs,
+                                        border: `1.5px solid ${aan ? KLEUREN.groen : KLEUREN.lijn}`,
+                                      }}
+                                    >
+                                      {aan && <Check size={11} />}{s.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs mr-1" style={{ color: KLEUREN.grijs }}>Temperatuur:</span>
+                                {TEMP_BANDEN.map((b) => {
+                                  const aan = (it.tempBanden || []).includes(b.id);
+                                  return (
+                                    <button
+                                      key={b.id}
+                                      onClick={() => wisselTempBand(it.id, b.id)}
+                                      className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
+                                      style={{
+                                        background: aan ? KLEUREN.navy : KLEUREN.wit,
+                                        color: aan ? KLEUREN.ivoor : KLEUREN.grijs,
+                                        border: `1.5px solid ${aan ? KLEUREN.navy : KLEUREN.lijn}`,
+                                      }}
+                                    >
+                                      {aan && <Check size={11} />}{b.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
                         </li>
