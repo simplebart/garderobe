@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Camera, Settings2, X } from "lucide-react";
+import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Camera, Settings2, X, Download, Upload } from "lucide-react";
 
 // ---------- Constanten ----------
 const KLEUREN = {
@@ -263,6 +263,13 @@ export default function GarderobeApp() {
   const eersteOpslag = useRef(true);
   const nieuwFotoInput = useRef(null);
 
+  // ---- Synchronisatie via Google Sheets (Apps Script) ----
+  const [syncConfig, setSyncConfig] = useState({ url: "", geheim: "" });
+  const [syncStatus, setSyncStatus] = useState("uit"); // uit | bezig | ok | fout
+  const [laatsteSync, setLaatsteSync] = useState(null);
+  const negeerPush = useRef(true); // eerste render en net-opgehaalde data niet terugpushen
+  const SYNC_SLEUTEL = "garderobe-sync-v1";
+
   // Laden uit localStorage (met migratie van oudere items)
   useEffect(() => {
     try {
@@ -290,6 +297,19 @@ export default function GarderobeApp() {
     }
     setGeladen(true);
     haalWeerOp();
+    // Sync-instellingen zijn per apparaat (eenmalig invullen) en staan los
+    // van de kastdata. Zijn ze aanwezig, dan halen we direct de laatste
+    // versie uit Google Sheets op.
+    try {
+      const s = localStorage.getItem(SYNC_SLEUTEL);
+      if (s) {
+        const cfg = JSON.parse(s);
+        if (cfg.url) {
+          setSyncConfig(cfg);
+          haalRemoteOp(cfg, true);
+        }
+      }
+    } catch (e) { /* geen sync ingesteld */ }
   }, []);
 
   // Opslaan bij wijzigingen. Foto's maken de data groter; als de opslag vol
@@ -477,6 +497,139 @@ export default function GarderobeApp() {
   }
 
   const aantalVies = items.filter((it) => it.vies).length;
+
+  // Past een volledige dataset toe (gebruikt door zowel import als sync).
+  function pasDataToe(data) {
+    if (!Array.isArray(data.items)) return false;
+    setItems(data.items.map((it) => ({
+      pasvorm: "regular",
+      laag: it.categorie === "top" ? "basis" : undefined,
+      kleur: "anders",
+      patroon: false,
+      merk: "",
+      foto: null,
+      ...it,
+    })));
+    if (data.stijl) setStijl(data.stijl);
+    if (data.kleuren?.length) setKleuren(data.kleuren);
+    if (data.stijlen?.length) setStijlen(data.stijlen);
+    setPlan(planNogGeldig(data.plan) ? data.plan : []);
+    return true;
+  }
+
+  // Haalt de kast op uit Google Sheets. Bij succes vervangt de remote versie
+  // de lokale (last-write-wins: het laatst gesynchroniseerde apparaat wint).
+  async function haalRemoteOp(cfg = syncConfig, stil = false) {
+    if (!cfg.url) return;
+    setSyncStatus("bezig");
+    try {
+      const res = await fetch(`${cfg.url}?geheim=${encodeURIComponent(cfg.geheim)}`);
+      const j = await res.json();
+      if (j.fout) throw new Error(j.fout);
+      if (j.data) {
+        negeerPush.current = true; // net opgehaald: niet meteen terugpushen
+        pasDataToe(j.data);
+      }
+      setSyncStatus("ok");
+      setLaatsteSync(new Date());
+      return j.data ? "gevuld" : "leeg";
+    } catch (e) {
+      console.error("Sync ophalen mislukt:", e);
+      setSyncStatus("fout");
+      if (!stil) alert("Ophalen uit Google Sheets mislukt. Controleer de URL en het geheim.");
+      return null;
+    }
+  }
+
+  // Slaat de huidige kast op in Google Sheets. Let op: Content-Type text/plain
+  // is bewust — Apps Script accepteert geen CORS-preflight, en een "simpel"
+  // POST-verzoek omzeilt die. Het script leest de JSON gewoon uit de body.
+  async function slaRemoteOp(cfg = syncConfig, stil = true) {
+    if (!cfg.url) return;
+    setSyncStatus("bezig");
+    try {
+      const res = await fetch(cfg.url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ geheim: cfg.geheim, data: { items, stijl, plan, kleuren, stijlen } }),
+      });
+      const j = await res.json();
+      if (j.fout) throw new Error(j.fout);
+      setSyncStatus("ok");
+      setLaatsteSync(new Date());
+    } catch (e) {
+      console.error("Sync opslaan mislukt:", e);
+      setSyncStatus("fout");
+      if (!stil) alert("Opslaan naar Google Sheets mislukt. Controleer de URL en het geheim.");
+    }
+  }
+
+  // Eenmalige koppeling: instellingen bewaren, ophalen wat er staat, en als
+  // het blad nog leeg is de huidige (lokale) kast als eerste versie uploaden.
+  async function verbindSync() {
+    const cfg = { url: syncConfig.url.trim(), geheim: syncConfig.geheim.trim() };
+    if (!cfg.url.startsWith("https://script.google.com/")) {
+      alert("Vul de web-app-URL van je Apps Script in (begint met https://script.google.com/…).");
+      return;
+    }
+    localStorage.setItem(SYNC_SLEUTEL, JSON.stringify(cfg));
+    setSyncConfig(cfg);
+    const resultaat = await haalRemoteOp(cfg, false);
+    if (resultaat === "leeg" && items.length) {
+      await slaRemoteOp(cfg, false);
+    }
+  }
+
+  function ontkoppelSync() {
+    localStorage.removeItem(SYNC_SLEUTEL);
+    setSyncConfig({ url: "", geheim: "" });
+    setSyncStatus("uit");
+    setLaatsteSync(null);
+  }
+
+  // Automatisch pushen: elke wijziging wordt na 2,5s rust naar het blad
+  // geschreven (debounce, zodat snel achter elkaar klikken één upload wordt).
+  useEffect(() => {
+    if (!geladen || !syncConfig.url) return;
+    if (negeerPush.current) { negeerPush.current = false; return; }
+    const timer = setTimeout(() => slaRemoteOp(), 2500);
+    return () => clearTimeout(timer);
+  }, [items, stijl, plan, kleuren, stijlen]);
+
+  // ---- Overzetten tussen apparaten (handmatige synchronisatie) ----
+  // Exporteert de volledige kast (incl. foto's, kleuren, stijlen en het
+  // lopende plan) als één bestand dat je op een ander apparaat importeert.
+  function exporteerData() {
+    const data = JSON.stringify({ items, stijl, plan, kleuren, stijlen }, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `garderobe-backup-${vandaagISO()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importeerData(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!Array.isArray(data.items)) throw new Error("geen geldige backup");
+        const ok = window.confirm(
+          `Backup gevonden met ${data.items.length} kledingstukken. Dit vervangt de huidige kast op dit apparaat. Doorgaan?`
+        );
+        if (!ok) return;
+        pasDataToe(data);
+      } catch (err) {
+        alert("Dit bestand kon niet gelezen worden als garderobe-backup.");
+      }
+    };
+    reader.readAsText(file);
+  }
 
   const OUTFIT_REGELS = [
     { sleutel: "basislaag", label: "Basislaag" },
@@ -850,14 +1003,33 @@ export default function GarderobeApp() {
               </div>
             </div>
 
-            {/* Beheer van kleuren en stijlen */}
-            <button
-              onClick={() => setBeheerOpen((o) => !o)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm mb-4"
-              style={{ border: `1.5px solid ${KLEUREN.lijn}`, background: KLEUREN.wit }}
-            >
-              <Settings2 size={15} /> Kleuren & stijlen aanpassen {beheerOpen ? "▴" : "▾"}
-            </button>
+            {/* Beheer van kleuren en stijlen + overzetten tussen apparaten */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              <button
+                onClick={() => setBeheerOpen((o) => !o)}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
+                style={{ border: `1.5px solid ${KLEUREN.lijn}`, background: KLEUREN.wit }}
+              >
+                <Settings2 size={15} /> Kleuren & stijlen aanpassen {beheerOpen ? "▴" : "▾"}
+              </button>
+              <button
+                onClick={exporteerData}
+                disabled={!items.length}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm disabled:opacity-40"
+                style={{ border: `1.5px solid ${KLEUREN.lijn}`, background: KLEUREN.wit }}
+                title="Download je kast als bestand om over te zetten naar een ander apparaat"
+              >
+                <Download size={15} /> Exporteer kast
+              </button>
+              <label
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer"
+                style={{ border: `1.5px solid ${KLEUREN.lijn}`, background: KLEUREN.wit }}
+                title="Laad een eerder geëxporteerd bestand in op dit apparaat"
+              >
+                <Upload size={15} /> Importeer
+                <input type="file" accept="application/json,.json" onChange={importeerData} className="hidden" />
+              </label>
+            </div>
 
             {beheerOpen && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
@@ -923,6 +1095,66 @@ export default function GarderobeApp() {
                     <button onClick={voegStijlToe} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
                       <Plus size={14} />
                     </button>
+                  </div>
+                </div>
+
+                {/* Synchronisatie via Google Sheets */}
+                <div className="rounded-xl p-4 sm:col-span-2" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                  <h3 className="font-medium mb-1 flex items-center gap-2" style={{ fontFamily: "Georgia, serif" }}>
+                    Synchronisatie via Google Sheets
+                    <span
+                      className="w-2.5 h-2.5 rounded-full"
+                      title={`Status: ${syncStatus}`}
+                      style={{
+                        background:
+                          syncStatus === "ok" ? KLEUREN.groen :
+                          syncStatus === "bezig" ? KLEUREN.goud :
+                          syncStatus === "fout" ? KLEUREN.bordeaux : "#C4C4C4",
+                      }}
+                    />
+                    <span className="text-xs font-normal" style={{ color: KLEUREN.grijs }}>
+                      {syncStatus === "uit" && "niet verbonden"}
+                      {syncStatus === "bezig" && "synchroniseren…"}
+                      {syncStatus === "ok" && laatsteSync && `gesynchroniseerd om ${laatsteSync.getHours()}:${String(laatsteSync.getMinutes()).padStart(2, "0")}`}
+                      {syncStatus === "fout" && "fout — controleer URL en geheim"}
+                    </span>
+                  </h3>
+                  <p className="text-xs mb-3" style={{ color: KLEUREN.grijs }}>
+                    Vul op elk apparaat eenmalig dezelfde web-app-URL en hetzelfde geheim in.
+                    Wijzigingen worden daarna automatisch opgeslagen; bij het openen wordt de laatste versie opgehaald.
+                  </p>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <input
+                      value={syncConfig.url}
+                      onChange={(e) => setSyncConfig({ ...syncConfig, url: e.target.value })}
+                      placeholder="https://script.google.com/macros/s/…/exec"
+                      className="flex-1 min-w-48 px-2 py-1.5 rounded-lg text-sm"
+                      style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
+                    />
+                    <input
+                      value={syncConfig.geheim}
+                      onChange={(e) => setSyncConfig({ ...syncConfig, geheim: e.target.value })}
+                      placeholder="Geheim"
+                      type="password"
+                      className="w-32 px-2 py-1.5 rounded-lg text-sm"
+                      style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
+                    />
+                    <button onClick={verbindSync} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
+                      Verbind & haal op
+                    </button>
+                    {syncStatus !== "uit" && (
+                      <>
+                        <button onClick={() => haalRemoteOp(syncConfig, false)} className="px-3 py-1.5 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
+                          Nu ophalen
+                        </button>
+                        <button onClick={() => slaRemoteOp(syncConfig, false)} className="px-3 py-1.5 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
+                          Nu opslaan
+                        </button>
+                        <button onClick={ontkoppelSync} className="px-3 py-1.5 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}`, color: KLEUREN.bordeaux }}>
+                          Ontkoppel
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
