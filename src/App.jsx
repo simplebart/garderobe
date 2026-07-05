@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles } from "lucide-react";
+import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Camera, Settings2, X } from "lucide-react";
 
 // ---------- Constanten ----------
 const KLEUREN = {
@@ -39,7 +39,9 @@ const LAGEN = [
   { id: "over", label: "Overlaag (trui, vest, hoodie)" },
 ];
 
-const KLEUR_OPTIES = [
+// Startlijsten — via "Kleuren & stijlen aanpassen" in de app uit te breiden
+// of in te korten; de aangepaste lijsten worden opgeslagen.
+const STANDAARD_KLEUREN = [
   { id: "wit", label: "Wit", hex: "#F5F5F5" },
   { id: "creme", label: "Crème / off-white", hex: "#EFE7D5" },
   { id: "beige", label: "Beige / kaki", hex: "#C9B28A" },
@@ -53,46 +55,43 @@ const KLEUR_OPTIES = [
   { id: "anders", label: "Anders / gemengd", hex: "#B8A6C9" },
 ];
 
-const STIJLEN = ["Modern preppy", "Casual", "Smart casual", "Sportief", "Klassiek"];
+const STANDAARD_STIJLEN = ["Modern preppy", "Casual", "Smart casual", "Sportief", "Klassiek"];
 
 const VOORBEELD_ITEMS = [
-  { naam: "Oxford overhemd (lichtblauw)", categorie: "top", laag: "basis", pasvorm: "regular", kleur: "lichtblauw", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 1 },
-  { naam: "Poloshirt (navy)", categorie: "top", laag: "basis", pasvorm: "slim", kleur: "navy", patroon: false, warmte: "warm", stijl: "Modern preppy", maxDraag: 1 },
-  { naam: "Linnen overhemd (wit)", categorie: "top", laag: "basis", pasvorm: "regular", kleur: "wit", patroon: false, warmte: "warm", stijl: "Smart casual", maxDraag: 1 },
-  { naam: "Geruit flanellen hemd", categorie: "top", laag: "basis", pasvorm: "regular", kleur: "bordeaux", patroon: true, warmte: "koud", stijl: "Casual", maxDraag: 1 },
-  { naam: "Wit t-shirt", categorie: "top", laag: "basis", pasvorm: "regular", kleur: "wit", patroon: false, warmte: "alle", stijl: "Casual", maxDraag: 1 },
-  { naam: "Kabeltrui (crème)", categorie: "top", laag: "over", pasvorm: "regular", kleur: "creme", patroon: false, warmte: "koud", stijl: "Modern preppy", maxDraag: 3 },
-  { naam: "Gestreept rugbyshirt", categorie: "top", laag: "over", pasvorm: "ruim", kleur: "navy", patroon: true, warmte: "mild", stijl: "Modern preppy", maxDraag: 2 },
-  { naam: "V-hals vest (navy)", categorie: "top", laag: "over", pasvorm: "slim", kleur: "navy", patroon: false, warmte: "mild", stijl: "Modern preppy", maxDraag: 3 },
-  { naam: "Chino (beige)", categorie: "broek", pasvorm: "slim", kleur: "beige", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 3 },
-  { naam: "Chino (navy)", categorie: "broek", pasvorm: "regular", kleur: "navy", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 3 },
-  { naam: "Wollen pantalon (grijs, geruit)", categorie: "broek", pasvorm: "ruim", kleur: "grijs", patroon: true, warmte: "koud", stijl: "Klassiek", maxDraag: 3 },
-  { naam: "Korte broek (kaki)", categorie: "broek", pasvorm: "regular", kleur: "beige", patroon: false, warmte: "warm", stijl: "Casual", maxDraag: 2 },
-  { naam: "Loafers (bruin leer)", categorie: "schoenen", pasvorm: "regular", kleur: "bruin", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 10, regenOk: false },
-  { naam: "Witte sneakers", categorie: "schoenen", pasvorm: "regular", kleur: "wit", patroon: false, warmte: "alle", stijl: "Casual", maxDraag: 10, regenOk: true },
-  { naam: "Chelsea boots", categorie: "schoenen", pasvorm: "regular", kleur: "bruin", patroon: false, warmte: "koud", stijl: "Smart casual", maxDraag: 10, regenOk: true },
-  { naam: "Trenchcoat", categorie: "jas", pasvorm: "regular", kleur: "beige", patroon: false, warmte: "mild", stijl: "Modern preppy", maxDraag: 10, regenOk: true },
-  { naam: "Wollen overjas (camel)", categorie: "jas", pasvorm: "regular", kleur: "bruin", patroon: false, warmte: "koud", stijl: "Klassiek", maxDraag: 10, regenOk: false },
-  { naam: "Harrington jack", categorie: "jas", pasvorm: "regular", kleur: "navy", patroon: false, warmte: "mild", stijl: "Modern preppy", maxDraag: 10, regenOk: true },
-  { naam: "Leren riem (bruin)", categorie: "accessoire", pasvorm: "regular", kleur: "bruin", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 30 },
-  { naam: "Wollen sjaal (tartan)", categorie: "accessoire", pasvorm: "regular", kleur: "bordeaux", patroon: true, warmte: "koud", stijl: "Modern preppy", maxDraag: 10 },
-  { naam: "Horloge (leren band)", categorie: "accessoire", pasvorm: "regular", kleur: "bruin", patroon: false, warmte: "alle", stijl: "Klassiek", maxDraag: 30 },
+  { naam: "Oxford overhemd (lichtblauw)", merk: "", categorie: "top", laag: "basis", pasvorm: "regular", kleur: "lichtblauw", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 1 },
+  { naam: "Poloshirt (navy)", merk: "", categorie: "top", laag: "basis", pasvorm: "slim", kleur: "navy", patroon: false, warmte: "warm", stijl: "Modern preppy", maxDraag: 1 },
+  { naam: "Linnen overhemd (wit)", merk: "", categorie: "top", laag: "basis", pasvorm: "regular", kleur: "wit", patroon: false, warmte: "warm", stijl: "Smart casual", maxDraag: 1 },
+  { naam: "Geruit flanellen hemd", merk: "", categorie: "top", laag: "basis", pasvorm: "regular", kleur: "bordeaux", patroon: true, warmte: "koud", stijl: "Casual", maxDraag: 1 },
+  { naam: "Wit t-shirt", merk: "", categorie: "top", laag: "basis", pasvorm: "regular", kleur: "wit", patroon: false, warmte: "alle", stijl: "Casual", maxDraag: 1 },
+  { naam: "Kabeltrui (crème)", merk: "", categorie: "top", laag: "over", pasvorm: "regular", kleur: "creme", patroon: false, warmte: "koud", stijl: "Modern preppy", maxDraag: 3 },
+  { naam: "Gestreept rugbyshirt", merk: "", categorie: "top", laag: "over", pasvorm: "ruim", kleur: "navy", patroon: true, warmte: "mild", stijl: "Modern preppy", maxDraag: 2 },
+  { naam: "V-hals vest (navy)", merk: "", categorie: "top", laag: "over", pasvorm: "slim", kleur: "navy", patroon: false, warmte: "mild", stijl: "Modern preppy", maxDraag: 3 },
+  { naam: "Chino (beige)", merk: "", categorie: "broek", pasvorm: "slim", kleur: "beige", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 3 },
+  { naam: "Chino (navy)", merk: "", categorie: "broek", pasvorm: "regular", kleur: "navy", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 3 },
+  { naam: "Wollen pantalon (grijs, geruit)", merk: "", categorie: "broek", pasvorm: "ruim", kleur: "grijs", patroon: true, warmte: "koud", stijl: "Klassiek", maxDraag: 3 },
+  { naam: "Korte broek (kaki)", merk: "", categorie: "broek", pasvorm: "regular", kleur: "beige", patroon: false, warmte: "warm", stijl: "Casual", maxDraag: 2 },
+  { naam: "Loafers (bruin leer)", merk: "", categorie: "schoenen", pasvorm: "regular", kleur: "bruin", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 10, regenOk: false },
+  { naam: "Witte sneakers", merk: "", categorie: "schoenen", pasvorm: "regular", kleur: "wit", patroon: false, warmte: "alle", stijl: "Casual", maxDraag: 10, regenOk: true },
+  { naam: "Chelsea boots", merk: "", categorie: "schoenen", pasvorm: "regular", kleur: "bruin", patroon: false, warmte: "koud", stijl: "Smart casual", maxDraag: 10, regenOk: true },
+  { naam: "Trenchcoat", merk: "", categorie: "jas", pasvorm: "regular", kleur: "beige", patroon: false, warmte: "mild", stijl: "Modern preppy", maxDraag: 10, regenOk: true },
+  { naam: "Wollen overjas (camel)", merk: "", categorie: "jas", pasvorm: "regular", kleur: "bruin", patroon: false, warmte: "koud", stijl: "Klassiek", maxDraag: 10, regenOk: false },
+  { naam: "Harrington jack", merk: "", categorie: "jas", pasvorm: "regular", kleur: "navy", patroon: false, warmte: "mild", stijl: "Modern preppy", maxDraag: 10, regenOk: true },
+  { naam: "Leren riem (bruin)", merk: "", categorie: "accessoire", pasvorm: "regular", kleur: "bruin", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 30 },
+  { naam: "Wollen sjaal (tartan)", merk: "", categorie: "accessoire", pasvorm: "regular", kleur: "bordeaux", patroon: true, warmte: "koud", stijl: "Modern preppy", maxDraag: 10 },
+  { naam: "Horloge (leren band)", merk: "", categorie: "accessoire", pasvorm: "regular", kleur: "bruin", patroon: false, warmte: "alle", stijl: "Klassiek", maxDraag: 30 },
 ];
 
 const DAGNAMEN = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
-const OPSLAG_SLEUTEL = "garderobe-app-v3";
+const OPSLAG_SLEUTEL = "garderobe-app-v4";
 
 // ---------- Hulpfuncties ----------
 const nieuwId = () => Math.random().toString(36).slice(2, 10);
 
 const warmteVanTemp = (t) => (t >= 19 ? "warm" : t >= 10 ? "mild" : "koud");
 
-// Datumhelpers voor de 5-daagse cyclus: een plan hoort bij vaste datums en
-// blijft geldig tot en met zijn laatste dag. Daarna begint een nieuwe "week".
 const vandaagISO = () => new Date().toISOString().slice(0, 10);
 const dagLabel = (datumISO) => {
-  const vandaag = vandaagISO();
-  if (datumISO === vandaag) return "vandaag";
+  if (datumISO === vandaagISO()) return "vandaag";
   return DAGNAMEN[new Date(datumISO + "T12:00:00").getDay()];
 };
 const isVerleden = (datumISO) => datumISO < vandaagISO();
@@ -109,20 +108,43 @@ const demoWeer = () => {
     d.setDate(d.getDate() + i);
     return {
       datum: d.toISOString().slice(0, 10),
-      dag: i === 0 ? "vandaag" : DAGNAMEN[d.getDay()],
       temp: Math.round(basis + (Math.random() * 8 - 4)),
       regenkans: Math.round(Math.random() * 100),
     };
   });
 };
 
+// Verkleint een gekozen foto tot max 320px en comprimeert naar JPEG, zodat
+// tientallen foto's samen ruim binnen de localStorage-limiet (±5MB) blijven.
+function comprimeerFoto(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 320;
+        const schaal = Math.min(1, MAX / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * schaal);
+        canvas.height = Math.round(img.height * schaal);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      };
+      img.onerror = () => reject(new Error("Afbeelding onleesbaar"));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error("Bestand onleesbaar"));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Zet een vrije naam om naar een kleur-id ("Olijfgroen" -> "olijfgroen")
+const naarId = (naam) =>
+  naam.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-");
+
 // ---------- Stijlregels ----------
-// Pasvorm: een ruime/oversized bovenkant gaat niet samen met een slim broek.
-// Alle andere combinaties mogen: slim boven + ruim onder, én ruim op ruim.
 const pasvormOk = (bovenRuim, broek) => !(bovenRuim && (broek.pasvorm || "regular") === "slim");
 
-// Kleur: geen identieke hoofdkleur direct op elkaar (navy trui op navy chino),
-// en een paar bekende botsers vermijden. Onbekende kleur ("anders") botst nooit.
 const KLEUR_CLASHES = [["navy", "zwart"], ["bruin", "zwart"]];
 const kleurenBotsen = (a, b) => {
   if (!a || !b || a === "anders" || b === "anders") return false;
@@ -130,16 +152,7 @@ const kleurenBotsen = (a, b) => {
   return KLEUR_CLASHES.some((p) => p.includes(a) && p.includes(b));
 };
 
-// Patroon: maximaal één opvallend patroon in de kern van de outfit
-// (basislaag + overlaag + broek). Accessoires tellen niet mee.
-
-// Laagvolgorde: een basislaag (hemd/t-shirt) komt altijd ónder een overlaag
-// (trui/vest). De generator bouwt alleen in die volgorde op.
-
 // ---------- Outfitgenerator ----------
-// Genereert één outfit voor één dag. `vermijden` is een zachte voorkeur:
-// items daarin worden liever niet gekozen (denk: gisteren gedragen, of bij
-// een herziening ook wat morgen al gepland staat), maar het is geen harde eis.
 function genereerDag(items, dag, stijl, vermijden = new Set()) {
   const behoefte = warmteVanTemp(dag.temp);
   const regent = dag.regenkans >= 50;
@@ -172,13 +185,9 @@ function genereerDag(items, dag, stijl, vermijden = new Set()) {
     return null;
   };
 
-  // Kleur- en patroonregels zijn "zacht": eerst kiezen mét de regel, en alleen
-  // als er dan niets schoons overblijft, zonder — liever een matige combinatie
-  // dan helemaal geen outfit.
   const kiesMetVoorkeur = (categorie, hard, voorkeur) =>
     kies(categorie, (it) => hard(it) && voorkeur(it)) || kies(categorie, hard);
 
-  // 1. Basislaag; zonder schone basislaag mag een trui alleen gedragen worden.
   let basislaag = kies("top", (it) => (it.laag || "basis") === "basis");
   let alleenOverlaag = false;
   if (!basislaag) {
@@ -186,24 +195,18 @@ function genereerDag(items, dag, stijl, vermijden = new Set()) {
     alleenOverlaag = true;
   }
 
-  // 2. Overlaag erbóven bij koeler weer (onder 14°), nooit andersom.
-  //    Voorkeur: kleur botst niet met de basislaag en niet twee patronen op elkaar.
   const overlaag =
     !alleenOverlaag && dag.temp < 14
       ? kiesMetVoorkeur(
           "top",
           (it) => it.laag === "over",
-          (it) =>
-            !kleurenBotsen(it.kleur, basislaag?.kleur) &&
-            !(it.patroon && basislaag?.patroon)
+          (it) => !kleurenBotsen(it.kleur, basislaag?.kleur) && !(it.patroon && basislaag?.patroon)
         )
       : undefined;
 
   const buitensteTop = overlaag || basislaag;
   const patronenBoven = [basislaag, overlaag].filter((it) => it?.patroon).length;
 
-  // 3. Broek. Hard: pasvormregel. Voorkeur: kleur botst niet met de zichtbare
-  //    bovenlaag en de patroonlimiet blijft op één.
   const bovenRuim = [basislaag, overlaag].filter(Boolean).some((it) => (it.pasvorm || "regular") === "ruim");
   const broek = kiesMetVoorkeur(
     "broek",
@@ -211,7 +214,6 @@ function genereerDag(items, dag, stijl, vermijden = new Set()) {
     (it) => !kleurenBotsen(it.kleur, buitensteTop?.kleur) && !(it.patroon && patronenBoven >= 1)
   );
 
-  // 4. Jas: voorkeur voor een kleur die niet botst met wat eronder zit.
   const jas =
     dag.temp < 15 || regent
       ? kiesMetVoorkeur("jas", () => true, (it) => !kleurenBotsen(it.kleur, buitensteTop?.kleur))
@@ -242,6 +244,8 @@ function genereerPlan(items, weerDagen, stijl) {
 export default function GarderobeApp() {
   const [items, setItems] = useState([]);
   const [stijl, setStijl] = useState("Modern preppy");
+  const [kleuren, setKleuren] = useState(STANDAARD_KLEUREN);
+  const [stijlen, setStijlen] = useState(STANDAARD_STIJLEN);
   const [weer, setWeer] = useState([]);
   const [weerBron, setWeerBron] = useState("demo");
   const [weerTijd, setWeerTijd] = useState(null);
@@ -249,11 +253,15 @@ export default function GarderobeApp() {
   const [plan, setPlan] = useState([]);
   const [tab, setTab] = useState("planner");
   const [geladen, setGeladen] = useState(false);
+  const [beheerOpen, setBeheerOpen] = useState(false);
+  const [nieuweKleur, setNieuweKleur] = useState({ label: "", hex: "#888888" });
+  const [nieuweStijl, setNieuweStijl] = useState("");
   const [nieuw, setNieuw] = useState({
-    naam: "", categorie: "top", laag: "basis", pasvorm: "regular",
-    kleur: "navy", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 1,
+    naam: "", merk: "", categorie: "top", laag: "basis", pasvorm: "regular",
+    kleur: "navy", patroon: false, warmte: "alle", stijl: "Modern preppy", maxDraag: 1, foto: null,
   });
   const eersteOpslag = useRef(true);
+  const nieuwFotoInput = useRef(null);
 
   // Laden uit localStorage (met migratie van oudere items)
   useEffect(() => {
@@ -267,14 +275,14 @@ export default function GarderobeApp() {
             laag: it.categorie === "top" ? "basis" : undefined,
             kleur: "anders",
             patroon: false,
+            merk: "",
+            foto: null,
             ...it,
           })));
         }
         if (data.stijl) setStijl(data.stijl);
-        // Het plan hoort bij vaste datums: valt vandaag nog binnen de vijf
-        // dagen van het opgeslagen plan, dan tonen we precies dat plan terug,
-        // inclusief welke outfits al als "gedragen" zijn gemarkeerd.
-        // Is de laatste dag voorbij, dan vervalt het en start een nieuwe cyclus.
+        if (data.kleuren?.length) setKleuren(data.kleuren);
+        if (data.stijlen?.length) setStijlen(data.stijlen);
         if (planNogGeldig(data.plan)) setPlan(data.plan);
       }
     } catch (e) {
@@ -284,16 +292,18 @@ export default function GarderobeApp() {
     haalWeerOp();
   }, []);
 
-  // Opslaan bij wijzigingen
+  // Opslaan bij wijzigingen. Foto's maken de data groter; als de opslag vol
+  // raakt, melden we dat in plaats van stilletjes te falen.
   useEffect(() => {
     if (!geladen) return;
     if (eersteOpslag.current) { eersteOpslag.current = false; return; }
     try {
-      localStorage.setItem(OPSLAG_SLEUTEL, JSON.stringify({ items, stijl, plan }));
+      localStorage.setItem(OPSLAG_SLEUTEL, JSON.stringify({ items, stijl, plan, kleuren, stijlen }));
     } catch (e) {
       console.error("Opslaan mislukt", e);
+      alert("Opslaan mislukt — waarschijnlijk is de browseropslag vol. Verwijder een paar foto's van kledingstukken en probeer opnieuw.");
     }
-  }, [items, stijl, plan, geladen]);
+  }, [items, stijl, plan, kleuren, stijlen, geladen]);
 
   async function haalWeerOp() {
     setWeerLaadt(true);
@@ -303,15 +313,11 @@ export default function GarderobeApp() {
       );
       if (!res.ok) throw new Error(`Open-Meteo antwoordde met status ${res.status}`);
       const d = await res.json();
-      const dagen = d.daily.time.map((t, i) => {
-        const dt = new Date(t);
-        return {
-          datum: t,
-          dag: i === 0 ? "vandaag" : DAGNAMEN[dt.getDay()],
-          temp: Math.round(d.daily.temperature_2m_max[i]),
-          regenkans: d.daily.precipitation_probability_max[i] ?? 0,
-        };
-      });
+      const dagen = d.daily.time.map((t, i) => ({
+        datum: t,
+        temp: Math.round(d.daily.temperature_2m_max[i]),
+        regenkans: d.daily.precipitation_probability_max[i] ?? 0,
+      }));
       setWeer(dagen);
       setWeerBron("live");
     } catch (e) {
@@ -325,7 +331,6 @@ export default function GarderobeApp() {
 
   function maakPlan() {
     if (!weer.length) return;
-    // Een lopend plan met al-gedragen outfits gooi je niet zomaar weg.
     if (planNogGeldig(plan) && plan.some((d) => d.gedragen)) {
       const ok = window.confirm(
         "Je huidige 5-daagse plan loopt nog en bevat al gedragen outfits. Weet je zeker dat je een nieuw plan wilt maken?"
@@ -353,9 +358,6 @@ export default function GarderobeApp() {
     setItems((prev) => prev.map((it) => ({ ...it, vies: false, draagTeller: 0 })));
   }
 
-  // Vergelijkt het weer waarmee de outfit gepland is met de actuele voorspelling.
-  // Significant afwijkend = 4° of meer verschil, of de regenverwachting wisselt
-  // van "droog" naar "regen" (of andersom) over de 50%-grens.
   function weerAfwijking(dag) {
     const actueel = weer.find((w) => w.datum === dag.datum);
     if (!actueel) return null;
@@ -365,9 +367,6 @@ export default function GarderobeApp() {
     return { actueel, tempVerschil, regenWissel };
   }
 
-  // Herziet alléén deze dag op basis van het actuele weer. De rest van het plan
-  // blijft onaangeroerd. Items uit de dag ervoor en erna worden liever vermeden,
-  // zodat de geen-twee-dagen-op-rij-regel ook na de herziening blijft kloppen.
   function herzieDag(i) {
     const actueel = weer.find((w) => w.datum === plan[i].datum);
     if (!actueel) return;
@@ -378,9 +377,7 @@ export default function GarderobeApp() {
     });
     const { outfit } = genereerDag(items, actueel, stijl, vermijden);
     setPlan((prev) =>
-      prev.map((d, j) =>
-        j === i ? { ...d, temp: actueel.temp, regenkans: actueel.regenkans, outfit } : d
-      )
+      prev.map((d, j) => (j === i ? { ...d, temp: actueel.temp, regenkans: actueel.regenkans, outfit } : d))
     );
   }
 
@@ -391,6 +388,7 @@ export default function GarderobeApp() {
       {
         ...nieuw,
         naam: nieuw.naam.trim(),
+        merk: nieuw.merk.trim(),
         id: nieuwId(),
         vies: false,
         draagTeller: 0,
@@ -399,7 +397,8 @@ export default function GarderobeApp() {
         laag: nieuw.categorie === "top" ? nieuw.laag : undefined,
       },
     ]);
-    setNieuw((n) => ({ ...n, naam: "" }));
+    setNieuw((n) => ({ ...n, naam: "", merk: "", foto: null }));
+    if (nieuwFotoInput.current) nieuwFotoInput.current.value = "";
   }
 
   function verwijder(id) {
@@ -407,7 +406,74 @@ export default function GarderobeApp() {
   }
 
   function laadVoorbeeld() {
-    setItems(VOORBEELD_ITEMS.map((it) => ({ ...it, id: nieuwId(), vies: false, draagTeller: 0, regenOk: it.regenOk !== false })));
+    setItems(VOORBEELD_ITEMS.map((it) => ({ ...it, id: nieuwId(), vies: false, draagTeller: 0, foto: null, regenOk: it.regenOk !== false })));
+  }
+
+  async function kiesNieuweFoto(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const foto = await comprimeerFoto(file);
+      setNieuw((n) => ({ ...n, foto }));
+    } catch (err) {
+      alert("Foto kon niet gelezen worden.");
+    }
+  }
+
+  async function wijzigItemFoto(id, e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const foto = await comprimeerFoto(file);
+      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, foto } : it)));
+    } catch (err) {
+      alert("Foto kon niet gelezen worden.");
+    }
+  }
+
+  // ---- Beheer van kleuren en stijlen ----
+  function voegKleurToe() {
+    const label = nieuweKleur.label.trim();
+    if (!label) return;
+    const id = naarId(label);
+    if (kleuren.some((k) => k.id === id)) {
+      alert("Er bestaat al een kleur met (bijna) deze naam.");
+      return;
+    }
+    setKleuren((prev) => [...prev, { id, label, hex: nieuweKleur.hex }]);
+    setNieuweKleur({ label: "", hex: "#888888" });
+  }
+
+  function verwijderKleur(id) {
+    const inGebruik = items.filter((it) => it.kleur === id).length;
+    if (inGebruik > 0) {
+      alert(`Deze kleur is in gebruik bij ${inGebruik} kledingstuk(ken). Wijzig die eerst.`);
+      return;
+    }
+    if (kleuren.length <= 2) return;
+    setKleuren((prev) => prev.filter((k) => k.id !== id));
+  }
+
+  function voegStijlToe() {
+    const naam = nieuweStijl.trim();
+    if (!naam) return;
+    if (stijlen.some((s) => s.toLowerCase() === naam.toLowerCase())) {
+      alert("Deze stijl bestaat al.");
+      return;
+    }
+    setStijlen((prev) => [...prev, naam]);
+    setNieuweStijl("");
+  }
+
+  function verwijderStijl(naam) {
+    const inGebruik = items.filter((it) => it.stijl === naam).length;
+    if (inGebruik > 0) {
+      alert(`Deze stijl is in gebruik bij ${inGebruik} kledingstuk(ken). Wijzig die eerst.`);
+      return;
+    }
+    if (stijlen.length <= 1) return;
+    setStijlen((prev) => prev.filter((s) => s !== naam));
+    if (stijl === naam) setStijl(stijlen.find((s) => s !== naam));
   }
 
   const aantalVies = items.filter((it) => it.vies).length;
@@ -432,17 +498,32 @@ export default function GarderobeApp() {
   });
 
   const pasvormLabel = (id) => PASVORMEN.find((p) => p.id === id)?.label || "Regular";
-  const kleurInfo = (id) => KLEUR_OPTIES.find((k) => k.id === id);
+  const kleurInfo = (id) => kleuren.find((k) => k.id === id);
+  const kleurNaam = (id) => kleurInfo(id)?.label || id || "onbekend";
 
-  const KleurStip = ({ kleur }) => {
-    const info = kleurInfo(kleur);
-    if (!info) return null;
+  // Visueel blokje per kledingstuk: de foto als die er is, anders een
+  // kleurvlak. De kleurnáám staat er altijd als tekst bij in de lijsten,
+  // zodat je nooit alleen op kleurherkenning hoeft te vertrouwen.
+  const ItemBeeld = ({ item, grootte = 44 }) => {
+    if (item?.foto) {
+      return (
+        <img
+          src={item.foto}
+          alt={item.naam}
+          className="rounded-lg object-cover shrink-0"
+          style={{ width: grootte, height: grootte, border: `1px solid ${KLEUREN.lijn}` }}
+        />
+      );
+    }
+    const info = kleurInfo(item?.kleur);
     return (
       <span
-        className="inline-block w-3 h-3 rounded-full align-middle"
-        style={{ background: info.hex, border: `1px solid ${KLEUREN.lijn}` }}
-        title={info.label}
-      />
+        className="rounded-lg shrink-0 flex items-center justify-center"
+        style={{ width: grootte, height: grootte, background: info?.hex || "#DDD", border: `1px solid ${KLEUREN.lijn}` }}
+        title={kleurNaam(item?.kleur)}
+      >
+        <Shirt size={Math.round(grootte * 0.45)} style={{ color: "rgba(255,255,255,0.85)", mixBlendMode: "difference" }} />
+      </span>
     );
   };
 
@@ -498,7 +579,7 @@ export default function GarderobeApp() {
                 className="px-3 py-2 rounded-lg text-sm"
                 style={{ border: `1.5px solid ${KLEUREN.lijn}`, background: KLEUREN.wit }}
               >
-                {STIJLEN.map((s) => (
+                {stijlen.map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </select>
@@ -590,9 +671,6 @@ export default function GarderobeApp() {
                     </span>
                   </div>
                   {(() => {
-                    // Waarschuwing alleen voor dagen die nog komen (of vandaag)
-                    // en nog niet gedragen zijn — het plan zelf blijft ongemoeid
-                    // tot je zelf op "Outfit herzien" drukt.
                     if (dag.gedragen || voorbij) return null;
                     const afwijking = weerAfwijking(dag);
                     if (!afwijking) return null;
@@ -623,24 +701,27 @@ export default function GarderobeApp() {
                     );
                   })()}
                   <div className="p-4">
-                    <ul className="space-y-1.5 mb-3">
+                    <ul className="space-y-2 mb-3">
                       {OUTFIT_REGELS.map(({ sleutel, label }) => {
                         const it = dag.outfit[sleutel];
                         const verplicht = ["basislaag", "broek", "schoenen"].includes(sleutel);
                         if (!it && !verplicht) return null;
                         return (
-                          <li key={sleutel} className="flex items-baseline gap-2 text-sm">
-                            <span className="w-24 shrink-0 uppercase text-xs tracking-wide" style={{ color: KLEUREN.grijs }}>{label}</span>
+                          <li key={sleutel} className="flex items-center gap-3 text-sm">
+                            <span className="w-20 shrink-0 uppercase text-xs tracking-wide" style={{ color: KLEUREN.grijs }}>{label}</span>
                             {it ? (
-                              <span className="flex items-center gap-1.5">
-                                <KleurStip kleur={it.kleur} />
-                                {it.naam}
-                                {(it.pasvorm || "regular") !== "regular" && (
-                                  <span className="text-xs" style={{ color: KLEUREN.grijs }}>· {pasvormLabel(it.pasvorm)}</span>
-                                )}
-                                {it.patroon && (
-                                  <span className="text-xs" style={{ color: KLEUREN.grijs }}>· patroon</span>
-                                )}
+                              <span className="flex items-center gap-3 min-w-0">
+                                <ItemBeeld item={it} grootte={44} />
+                                <span className="min-w-0">
+                                  <span className="block truncate">
+                                    {it.merk ? `${it.merk} — ` : ""}{it.naam}
+                                  </span>
+                                  <span className="block text-xs" style={{ color: KLEUREN.grijs }}>
+                                    {kleurNaam(it.kleur)}
+                                    {(it.pasvorm || "regular") !== "regular" ? ` · ${pasvormLabel(it.pasvorm).toLowerCase()}` : ""}
+                                    {it.patroon ? " · patroon" : ""}
+                                  </span>
+                                </span>
                               </span>
                             ) : (
                               <span style={{ color: KLEUREN.bordeaux }}>Geen schoon item beschikbaar — tijd voor de was?</span>
@@ -668,17 +749,26 @@ export default function GarderobeApp() {
         {/* ---------- KAST ---------- */}
         {tab === "kast" && (
           <section>
-            <div className="rounded-xl p-4 mb-6" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+            {/* Toevoegen */}
+            <div className="rounded-xl p-4 mb-4" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
               <h2 className="font-medium mb-3" style={{ fontFamily: "Georgia, serif" }}>Kledingstuk toevoegen</h2>
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
                 <input
                   value={nieuw.naam}
                   onChange={(e) => setNieuw({ ...nieuw, naam: e.target.value })}
-                  onKeyDown={(e) => e.key === "Enter" && voegToe()}
-                  placeholder="Bijv. Oxford overhemd (lichtblauw)"
-                  className="flex-1 min-w-40 px-3 py-2 rounded-lg text-sm"
+                  placeholder="Naam, bijv. Oxford overhemd (lichtblauw)"
+                  className="px-3 py-2 rounded-lg text-sm"
                   style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
                 />
+                <input
+                  value={nieuw.merk}
+                  onChange={(e) => setNieuw({ ...nieuw, merk: e.target.value })}
+                  placeholder="Merk, bijv. Ralph Lauren (optioneel)"
+                  className="px-3 py-2 rounded-lg text-sm"
+                  style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
+                />
+              </div>
+              <div className="flex flex-wrap gap-2 mb-2">
                 <select value={nieuw.categorie} onChange={(e) => setNieuw({ ...nieuw, categorie: e.target.value })} className="px-2 py-2 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
                   {CATEGORIEEN.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
@@ -690,23 +780,16 @@ export default function GarderobeApp() {
                 <select value={nieuw.pasvorm} onChange={(e) => setNieuw({ ...nieuw, pasvorm: e.target.value })} className="px-2 py-2 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
                   {PASVORMEN.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
-                <select value={nieuw.kleur} onChange={(e) => setNieuw({ ...nieuw, kleur: e.target.value })} className="px-2 py-2 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
-                  {KLEUR_OPTIES.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
-                </select>
-                <label className="flex items-center gap-1.5 text-sm px-2" style={{ color: KLEUREN.grijs }}>
-                  <input
-                    type="checkbox"
-                    checked={nieuw.patroon}
-                    onChange={(e) => setNieuw({ ...nieuw, patroon: e.target.checked })}
-                  />
-                  Opvallend patroon
-                </label>
                 <select value={nieuw.warmte} onChange={(e) => setNieuw({ ...nieuw, warmte: e.target.value })} className="px-2 py-2 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
                   {WARMTE.map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
                 </select>
                 <select value={nieuw.stijl} onChange={(e) => setNieuw({ ...nieuw, stijl: e.target.value })} className="px-2 py-2 rounded-lg text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
-                  {STIJLEN.map((s) => <option key={s}>{s}</option>)}
+                  {stijlen.map((s) => <option key={s}>{s}</option>)}
                 </select>
+                <label className="flex items-center gap-1.5 text-sm px-2" style={{ color: KLEUREN.grijs }}>
+                  <input type="checkbox" checked={nieuw.patroon} onChange={(e) => setNieuw({ ...nieuw, patroon: e.target.checked })} />
+                  Opvallend patroon
+                </label>
                 <label className="flex items-center gap-1 text-sm px-2" style={{ color: KLEUREN.grijs }}>
                   Vies na
                   <input
@@ -717,17 +800,135 @@ export default function GarderobeApp() {
                   />
                   x dragen
                 </label>
-                <button onClick={voegToe} className="flex items-center gap-1 px-4 py-2 rounded-lg text-sm font-medium" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
+              </div>
+
+              {/* Kleurkeuze: grote klikbare vlakken mét naam, in plaats van een dropdown */}
+              <p className="text-xs uppercase tracking-wide mb-1.5" style={{ color: KLEUREN.grijs }}>Kleur</p>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {kleuren.map((k) => {
+                  const actief = nieuw.kleur === k.id;
+                  return (
+                    <button
+                      key={k.id}
+                      onClick={() => setNieuw({ ...nieuw, kleur: k.id })}
+                      className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-full text-xs font-medium"
+                      style={{
+                        border: actief ? `2px solid ${KLEUREN.navy}` : `1.5px solid ${KLEUREN.lijn}`,
+                        background: actief ? "#EDF0F7" : KLEUREN.wit,
+                      }}
+                      title={k.label}
+                    >
+                      <span className="w-5 h-5 rounded-full" style={{ background: k.hex, border: `1px solid ${KLEUREN.lijn}` }} />
+                      {k.label}
+                      {actief && <Check size={13} />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Foto + toevoegen */}
+              <div className="flex flex-wrap items-center gap-3">
+                <label
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer"
+                  style={{ border: `1.5px dashed ${KLEUREN.lijn}`, background: KLEUREN.ivoor }}
+                >
+                  <Camera size={16} />
+                  {nieuw.foto ? "Andere foto kiezen" : "Foto toevoegen (optioneel)"}
+                  <input ref={nieuwFotoInput} type="file" accept="image/*" onChange={kiesNieuweFoto} className="hidden" />
+                </label>
+                {nieuw.foto && (
+                  <span className="flex items-center gap-2">
+                    <img src={nieuw.foto} alt="Voorbeeld" className="w-11 h-11 rounded-lg object-cover" style={{ border: `1px solid ${KLEUREN.lijn}` }} />
+                    <button onClick={() => setNieuw((n) => ({ ...n, foto: null }))} title="Foto verwijderen" style={{ color: KLEUREN.grijs }}>
+                      <X size={16} />
+                    </button>
+                  </span>
+                )}
+                <button onClick={voegToe} className="flex items-center gap-1 px-4 py-2 rounded-lg text-sm font-medium ml-auto" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
                   <Plus size={16} /> Toevoegen
                 </button>
               </div>
-              <p className="text-xs mt-3" style={{ color: KLEUREN.grijs }}>
-                Stijlregels: ruim boven + slim onder wordt vermeden (slim boven + ruim onder en ruim op ruim mogen wél),
-                een basislaag komt altijd ónder een overlaag, geen identieke of botsende kleuren direct op elkaar,
-                en maximaal één opvallend patroon per outfit.
-              </p>
             </div>
 
+            {/* Beheer van kleuren en stijlen */}
+            <button
+              onClick={() => setBeheerOpen((o) => !o)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm mb-4"
+              style={{ border: `1.5px solid ${KLEUREN.lijn}`, background: KLEUREN.wit }}
+            >
+              <Settings2 size={15} /> Kleuren & stijlen aanpassen {beheerOpen ? "▴" : "▾"}
+            </button>
+
+            {beheerOpen && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                <div className="rounded-xl p-4" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                  <h3 className="font-medium mb-2" style={{ fontFamily: "Georgia, serif" }}>Kleuren</h3>
+                  <ul className="space-y-1.5 mb-3">
+                    {kleuren.map((k) => (
+                      <li key={k.id} className="flex items-center gap-2 text-sm">
+                        <span className="w-6 h-6 rounded-md shrink-0" style={{ background: k.hex, border: `1px solid ${KLEUREN.lijn}` }} />
+                        <span className="flex-1">{k.label}</span>
+                        <button onClick={() => verwijderKleur(k.id)} title="Kleur verwijderen" style={{ color: KLEUREN.grijs }}>
+                          <Trash2 size={14} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={nieuweKleur.label}
+                      onChange={(e) => setNieuweKleur({ ...nieuweKleur, label: e.target.value })}
+                      onKeyDown={(e) => e.key === "Enter" && voegKleurToe()}
+                      placeholder="Naam, bijv. Olijfgroen"
+                      className="flex-1 min-w-0 px-2 py-1.5 rounded-lg text-sm"
+                      style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
+                    />
+                    <input
+                      type="color"
+                      value={nieuweKleur.hex}
+                      onChange={(e) => setNieuweKleur({ ...nieuweKleur, hex: e.target.value })}
+                      className="w-9 h-9 rounded cursor-pointer"
+                      title="Kies het kleurvlak"
+                    />
+                    <button onClick={voegKleurToe} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                  <p className="text-xs mt-2" style={{ color: KLEUREN.grijs }}>
+                    De naam is leidend — het kleurvlak is alleen ter herkenning in de lijsten.
+                  </p>
+                </div>
+
+                <div className="rounded-xl p-4" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                  <h3 className="font-medium mb-2" style={{ fontFamily: "Georgia, serif" }}>Stijlen</h3>
+                  <ul className="flex flex-wrap gap-1.5 mb-3">
+                    {stijlen.map((s) => (
+                      <li key={s} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
+                        {s}
+                        <button onClick={() => verwijderStijl(s)} title="Stijl verwijderen" style={{ color: KLEUREN.grijs }}>
+                          <X size={13} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={nieuweStijl}
+                      onChange={(e) => setNieuweStijl(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && voegStijlToe()}
+                      placeholder="Bijv. Streetwear"
+                      className="flex-1 min-w-0 px-2 py-1.5 rounded-lg text-sm"
+                      style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
+                    />
+                    <button onClick={voegStijlToe} className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Itemlijst */}
             {!items.length ? (
               <div className="text-center py-8">
                 <p className="mb-4" style={{ color: KLEUREN.grijs }}>Nog geen kledingstukken.</p>
@@ -745,26 +946,33 @@ export default function GarderobeApp() {
                     <ul className="space-y-1.5">
                       {groep.map((it) => (
                         <li key={it.id} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                          <ItemBeeld item={it} grootte={44} />
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-sm truncate">
+                              {it.merk ? `${it.merk} — ` : ""}{it.naam}
+                            </span>
+                            <span className="block text-xs" style={{ color: KLEUREN.grijs }}>
+                              {kleurNaam(it.kleur)}
+                              {it.categorie === "top" ? ` · ${it.laag === "over" ? "overlaag" : "basislaag"}` : ""}
+                              {` · ${pasvormLabel(it.pasvorm).toLowerCase()}`}
+                              {it.patroon ? " · patroon" : ""}
+                              {` · ${it.stijl}`}
+                            </span>
+                          </span>
                           <span
-                            className="w-2.5 h-2.5 rounded-full shrink-0"
-                            style={{ background: it.vies ? KLEUREN.bordeaux : KLEUREN.groen }}
-                            title={it.vies ? "Vies" : "Schoon"}
-                          />
-                          <span className="flex-1 text-sm flex items-center gap-1.5 flex-wrap">
-                            <KleurStip kleur={it.kleur} />
-                            {it.naam}
-                            {it.categorie === "top" && (
-                              <span className="text-xs" style={{ color: KLEUREN.grijs }}>
-                                · {it.laag === "over" ? "overlaag" : "basislaag"}
-                              </span>
-                            )}
-                            {it.patroon && <span className="text-xs" style={{ color: KLEUREN.grijs }}>· patroon</span>}
+                            className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0"
+                            style={{
+                              background: it.vies ? "#F9E9E4" : "#E8F0EA",
+                              color: it.vies ? KLEUREN.bordeaux : KLEUREN.groen,
+                            }}
+                          >
+                            {it.vies ? "vies" : `schoon ${it.draagTeller || 0}/${it.maxDraag}`}
                           </span>
-                          <span className="text-xs" style={{ color: KLEUREN.grijs }}>{pasvormLabel(it.pasvorm)}</span>
-                          <span className="text-xs" style={{ color: KLEUREN.grijs }}>
-                            {it.vies ? "vies" : `schoon · ${it.draagTeller || 0}/${it.maxDraag}x`}
-                          </span>
-                          <button onClick={() => verwijder(it.id)} title="Verwijderen" style={{ color: KLEUREN.grijs }}>
+                          <label className="cursor-pointer shrink-0" title="Foto toevoegen of wijzigen" style={{ color: KLEUREN.grijs }}>
+                            <Camera size={15} />
+                            <input type="file" accept="image/*" onChange={(e) => wijzigItemFoto(it.id, e)} className="hidden" />
+                          </label>
+                          <button onClick={() => verwijder(it.id)} title="Verwijderen" className="shrink-0" style={{ color: KLEUREN.grijs }}>
                             <Trash2 size={15} />
                           </button>
                         </li>
