@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Camera, Settings2, X, Download, Upload } from "lucide-react";
+import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Camera, Settings2, X, Download, Upload, Pencil } from "lucide-react";
 
 // ---------- Constanten ----------
 const KLEUREN = {
@@ -84,6 +84,51 @@ const VOORBEELD_ITEMS = [
 const DAGNAMEN = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
 const OPSLAG_SLEUTEL = "garderobe-app-v4";
 
+// ---------- Seizoenen ----------
+const SEIZOENEN = [
+  { id: "lente", label: "Lente" },
+  { id: "zomer", label: "Zomer" },
+  { id: "herfst", label: "Herfst" },
+  { id: "winter", label: "Winter" },
+];
+
+// Trefwoorden in de naam die een seizoen verraden. Wordt gecombineerd met de
+// temperatuurklasse: staat er een trefwoord in de naam, dan wint dat; anders
+// bepaalt de warmte het seizoen (koud -> herfst/winter, warm -> zomer,
+// mild -> lente/herfst, alle -> alle vier).
+const SEIZOEN_TREFWOORDEN = [
+  { woorden: ["trui", "sweater", "hoodie", "kabel", "wol", "fleece", "gebreid", "coltrui", "flanel"], seizoenen: ["herfst", "winter"] },
+  { woorden: ["short", "korte broek", "zwembroek", "linnen", "sandaal", "slipper", "espadrille"], seizoenen: ["zomer"] },
+  { woorden: ["winterjas", "overjas", "parka", "dons", "puffer", "snowboot"], seizoenen: ["winter"] },
+  { woorden: ["sjaal", "muts", "handschoen", "thermo"], seizoenen: ["herfst", "winter"] },
+  { woorden: ["trench", "regenjas", "harrington", "windjack"], seizoenen: ["lente", "herfst"] },
+  { woorden: ["zonnebril", "pet", "cap", "strohoed"], seizoenen: ["lente", "zomer"] },
+];
+
+const WARMTE_NAAR_SEIZOEN = {
+  koud: ["herfst", "winter"],
+  mild: ["lente", "herfst"],
+  warm: ["zomer"],
+  alle: ["lente", "zomer", "herfst", "winter"],
+};
+
+function afleidSeizoenen(item) {
+  const naam = (item.naam || "").toLowerCase();
+  const gevonden = new Set();
+  for (const regel of SEIZOEN_TREFWOORDEN) {
+    if (regel.woorden.some((w) => naam.includes(w))) {
+      regel.seizoenen.forEach((s) => gevonden.add(s));
+    }
+  }
+  if (gevonden.size) return SEIZOENEN.map((s) => s.id).filter((id) => gevonden.has(id));
+  return WARMTE_NAAR_SEIZOEN[item.warmte] || WARMTE_NAAR_SEIZOEN.alle;
+}
+
+const seizoenTekst = (lijst) => {
+  if (!lijst?.length || lijst.length === 4) return "alle seizoenen";
+  return SEIZOENEN.filter((s) => lijst.includes(s.id)).map((s) => s.label.toLowerCase()).join(" · ");
+};
+
 // ---------- Hulpfuncties ----------
 const nieuwId = () => Math.random().toString(36).slice(2, 10);
 
@@ -141,6 +186,25 @@ function comprimeerFoto(file) {
 // Zet een vrije naam om naar een kleur-id ("Olijfgroen" -> "olijfgroen")
 const naarId = (naam) =>
   naam.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-");
+
+// Vult ontbrekende velden aan bij oudere items — inclusief seizoenen, zodat
+// alles wat je al hebt ingevoerd automatisch een seizoen krijgt zonder dat je
+// het opnieuw hoeft te doen. Handmatig aangepaste seizoenen blijven staan.
+function normaliseerItem(it) {
+  const basis = {
+    pasvorm: "regular",
+    laag: it.categorie === "top" ? "basis" : undefined,
+    kleur: "anders",
+    patroon: false,
+    merk: "",
+    foto: null,
+    ...it,
+  };
+  if (!Array.isArray(basis.seizoenen) || !basis.seizoenen.length) {
+    basis.seizoenen = afleidSeizoenen(basis);
+  }
+  return basis;
+}
 
 // ---------- Stijlregels ----------
 const pasvormOk = (bovenRuim, broek) => !(bovenRuim && (broek.pasvorm || "regular") === "slim");
@@ -277,15 +341,7 @@ export default function GarderobeApp() {
       if (r) {
         const data = JSON.parse(r);
         if (data.items) {
-          setItems(data.items.map((it) => ({
-            pasvorm: "regular",
-            laag: it.categorie === "top" ? "basis" : undefined,
-            kleur: "anders",
-            patroon: false,
-            merk: "",
-            foto: null,
-            ...it,
-          })));
+          setItems(data.items.map(normaliseerItem));
         }
         if (data.stijl) setStijl(data.stijl);
         if (data.kleuren?.length) setKleuren(data.kleuren);
@@ -403,20 +459,19 @@ export default function GarderobeApp() {
 
   function voegToe() {
     if (!nieuw.naam.trim()) return;
-    setItems((prev) => [
-      ...prev,
-      {
-        ...nieuw,
-        naam: nieuw.naam.trim(),
-        merk: nieuw.merk.trim(),
-        id: nieuwId(),
-        vies: false,
-        draagTeller: 0,
-        maxDraag: Number(nieuw.maxDraag) || 1,
-        regenOk: true,
-        laag: nieuw.categorie === "top" ? nieuw.laag : undefined,
-      },
-    ]);
+    const kaal = {
+      ...nieuw,
+      naam: nieuw.naam.trim(),
+      merk: nieuw.merk.trim(),
+      id: nieuwId(),
+      vies: false,
+      draagTeller: 0,
+      maxDraag: Number(nieuw.maxDraag) || 1,
+      regenOk: true,
+      laag: nieuw.categorie === "top" ? nieuw.laag : undefined,
+    };
+    kaal.seizoenen = afleidSeizoenen(kaal);
+    setItems((prev) => [...prev, kaal]);
     setNieuw((n) => ({ ...n, naam: "", merk: "", foto: null }));
     if (nieuwFotoInput.current) nieuwFotoInput.current.value = "";
   }
@@ -426,7 +481,25 @@ export default function GarderobeApp() {
   }
 
   function laadVoorbeeld() {
-    setItems(VOORBEELD_ITEMS.map((it) => ({ ...it, id: nieuwId(), vies: false, draagTeller: 0, foto: null, regenOk: it.regenOk !== false })));
+    setItems(VOORBEELD_ITEMS.map((it) => normaliseerItem({ ...it, id: nieuwId(), vies: false, draagTeller: 0, foto: null, regenOk: it.regenOk !== false })));
+  }
+
+  // ---- Seizoenen: filter en handmatig bijstellen ----
+  const [seizoenFilter, setSeizoenFilter] = useState("alle");
+  const [bewerkSeizoenId, setBewerkSeizoenId] = useState(null);
+
+  function wisselSeizoen(itemId, seizoen) {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId) return it;
+        const huidig = it.seizoenen || [];
+        const nieuwLijst = huidig.includes(seizoen)
+          ? huidig.filter((s) => s !== seizoen)
+          : [...huidig, seizoen];
+        // Minstens één seizoen laten staan, anders verdwijnt het item overal.
+        return nieuwLijst.length ? { ...it, seizoenen: nieuwLijst } : it;
+      })
+    );
   }
 
   async function kiesNieuweFoto(e) {
@@ -501,15 +574,7 @@ export default function GarderobeApp() {
   // Past een volledige dataset toe (gebruikt door zowel import als sync).
   function pasDataToe(data) {
     if (!Array.isArray(data.items)) return false;
-    setItems(data.items.map((it) => ({
-      pasvorm: "regular",
-      laag: it.categorie === "top" ? "basis" : undefined,
-      kleur: "anders",
-      patroon: false,
-      merk: "",
-      foto: null,
-      ...it,
-    })));
+    setItems(data.items.map(normaliseerItem));
     if (data.stijl) setStijl(data.stijl);
     if (data.kleuren?.length) setKleuren(data.kleuren);
     if (data.stijlen?.length) setStijlen(data.stijlen);
@@ -1160,6 +1225,32 @@ export default function GarderobeApp() {
               </div>
             )}
 
+            {/* Seizoensfilter: klik een seizoen om alleen de passende stukken
+                te zien — handig bij het wisselen/opruimen van de kast. */}
+            {items.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 mb-4">
+                <span className="text-xs uppercase tracking-wide mr-1" style={{ color: KLEUREN.grijs }}>Seizoen:</span>
+                {[{ id: "alle", label: "Alles" }, ...SEIZOENEN].map((s) => {
+                  const actief = seizoenFilter === s.id;
+                  const aantal = s.id === "alle" ? items.length : items.filter((it) => it.seizoenen?.includes(s.id)).length;
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => setSeizoenFilter(s.id)}
+                      className="px-3 py-1.5 rounded-full text-sm font-medium"
+                      style={{
+                        background: actief ? KLEUREN.navy : KLEUREN.wit,
+                        color: actief ? KLEUREN.ivoor : KLEUREN.navy,
+                        border: `1.5px solid ${actief ? KLEUREN.navy : KLEUREN.lijn}`,
+                      }}
+                    >
+                      {s.label} <span style={{ opacity: 0.6 }}>({aantal})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Itemlijst */}
             {!items.length ? (
               <div className="text-center py-8">
@@ -1170,14 +1261,19 @@ export default function GarderobeApp() {
               </div>
             ) : (
               CATEGORIEEN.map((cat) => {
-                const groep = items.filter((it) => it.categorie === cat.id);
+                const groep = items.filter(
+                  (it) =>
+                    it.categorie === cat.id &&
+                    (seizoenFilter === "alle" || it.seizoenen?.includes(seizoenFilter))
+                );
                 if (!groep.length) return null;
                 return (
                   <div key={cat.id} className="mb-6">
                     <h3 className="uppercase text-xs tracking-widest mb-2" style={{ color: KLEUREN.bordeaux, letterSpacing: "0.15em" }}>{cat.label}</h3>
                     <ul className="space-y-1.5">
                       {groep.map((it) => (
-                        <li key={it.id} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                        <li key={it.id} className="rounded-lg px-3 py-2" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                          <div className="flex items-center gap-3">
                           <ItemBeeld item={it} grootte={44} />
                           <span className="flex-1 min-w-0">
                             <span className="block text-sm truncate">
@@ -1190,6 +1286,9 @@ export default function GarderobeApp() {
                               {it.patroon ? " · patroon" : ""}
                               {` · ${it.stijl}`}
                             </span>
+                            <span className="block text-xs capitalize" style={{ color: KLEUREN.groen }}>
+                              {seizoenTekst(it.seizoenen)}
+                            </span>
                           </span>
                           <span
                             className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0"
@@ -1200,6 +1299,14 @@ export default function GarderobeApp() {
                           >
                             {it.vies ? "vies" : `schoon ${it.draagTeller || 0}/${it.maxDraag}`}
                           </span>
+                          <button
+                            onClick={() => setBewerkSeizoenId(bewerkSeizoenId === it.id ? null : it.id)}
+                            title="Seizoenen aanpassen"
+                            className="shrink-0"
+                            style={{ color: bewerkSeizoenId === it.id ? KLEUREN.navy : KLEUREN.grijs }}
+                          >
+                            <Pencil size={15} />
+                          </button>
                           <label className="cursor-pointer shrink-0" title="Foto toevoegen of wijzigen" style={{ color: KLEUREN.grijs }}>
                             <Camera size={15} />
                             <input type="file" accept="image/*" onChange={(e) => wijzigItemFoto(it.id, e)} className="hidden" />
@@ -1207,6 +1314,29 @@ export default function GarderobeApp() {
                           <button onClick={() => verwijder(it.id)} title="Verwijderen" className="shrink-0" style={{ color: KLEUREN.grijs }}>
                             <Trash2 size={15} />
                           </button>
+                          </div>
+                          {bewerkSeizoenId === it.id && (
+                            <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
+                              <span className="text-xs mr-1" style={{ color: KLEUREN.grijs }}>Geschikt voor:</span>
+                              {SEIZOENEN.map((s) => {
+                                const aan = it.seizoenen?.includes(s.id);
+                                return (
+                                  <button
+                                    key={s.id}
+                                    onClick={() => wisselSeizoen(it.id, s.id)}
+                                    className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
+                                    style={{
+                                      background: aan ? KLEUREN.groen : KLEUREN.wit,
+                                      color: aan ? KLEUREN.ivoor : KLEUREN.grijs,
+                                      border: `1.5px solid ${aan ? KLEUREN.groen : KLEUREN.lijn}`,
+                                    }}
+                                  >
+                                    {aan && <Check size={11} />}{s.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                         </li>
                       ))}
                     </ul>
