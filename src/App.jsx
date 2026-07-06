@@ -833,57 +833,77 @@ export default function GarderobeApp() {
   const itemKleuren = (item) => (item?.kleuren?.length ? item.kleuren : [item?.kleur].filter(Boolean));
   const kleurenTekst = (item) => itemKleuren(item).map(kleurNaam).join(" · ") || "onbekend";
 
-  // Elk categorietype heeft zijn eigen silhouet, in dezelfde lijnstijl als
-  // het logo. Zo zie je in een oogopslag of iets een broek, schoen of jas is,
-  // ook zonder foto. Getekend als simpele paden op een 24x24-raster.
-  const CATEGORIE_PADEN = {
-    top: (
-      <>
-        <path d="M8 4 L4.5 7.5 L7 10 V20 H17 V10 L19.5 7.5 L16 4 C14.5 5.6 9.5 5.6 8 4 Z" />
-      </>
-    ),
-    broek: (
-      <>
-        <path d="M7 4 H17 L18.5 20 H14.3 L12 10.5 L9.7 20 H5.5 Z" />
-        <path d="M7 7.5 H17" />
-      </>
-    ),
-    schoenen: (
-      <>
-        <path d="M5.5 6 H11 V11 L16.5 13.5 C18.6 14.4 20 15.6 20 17 V18.5 H5.5 Z" />
-        <path d="M5.5 15.5 H20" />
-      </>
-    ),
-    jas: (
-      <>
-        <path d="M8.5 4 L5.5 6.5 V20 H11 L12 8.5 L13 20 H18.5 V6.5 L15.5 4 C14 6 10 6 8.5 4 Z" />
-        <path d="M8.5 4 L12 8.5 L15.5 4" />
-      </>
-    ),
-    accessoire: (
-      <>
-        <circle cx="12" cy="12" r="4.2" />
-        <path d="M9.8 8.2 V4 H14.2 V8.2 M9.8 15.8 V20 H14.2 V15.8" />
-      </>
-    ),
+  // Kledingillustraties: elk type heeft een eigen, met zorg getekend
+  // silhouet op een 48x48-raster. Het silhouet wordt gevuld met de
+  // kleur(en) van het item zelf (meerdere kleuren = verticale banen),
+  // met een dunne contour en detailtekening eroverheen. Bovenstukken
+  // maken onderscheid tussen hemd (kraag) en trui (ronde hals, boord).
+  const KLEDING_VORMEN = {
+    hemd: {
+      omtrek: "M17 7 L7 11.5 L10.5 20 L14 17.8 V41 H34 V17.8 L37.5 20 L41 11.5 L31 7 C29 10.6 19 10.6 17 7 Z",
+      details: ["M17 7 L24 16 L31 7", "M24 16 V41", "M14 17.8 L10.5 20", "M34 17.8 L37.5 20"],
+    },
+    trui: {
+      omtrek: "M16 7.5 L6.5 11.5 V29.5 H12 V41 H36 V29.5 H41.5 V11.5 L32 7.5 C30 11 18 11 16 7.5 Z",
+      details: ["M18 8.4 C19.5 11.6 28.5 11.6 30 8.4", "M12 37.4 H36", "M6.5 26 H12", "M36 26 H41.5"],
+    },
+    broek: {
+      omtrek: "M14 7 H34 L36.8 41 H27.6 L24 19.5 L20.4 41 H11.2 Z",
+      details: ["M14 11.8 H34", "M24 7 V11.8"],
+    },
+    schoenen: {
+      omtrek: "M9 34.5 C7.8 28 10 19.5 13.5 16.5 L19.5 23 C23.5 27 31.5 28 37.5 30 C41 31.2 42.2 33.2 41.6 34.5 Z",
+      details: ["M8.4 38 H42", "M17 20.4 C19.5 18.4 23.5 18.6 25.5 21", "M33 29 L31.5 34.5"],
+    },
+    jas: {
+      omtrek: "M15 6 L6.5 10 V42 H20.5 L24 17 L27.5 42 H41.5 V10 L33 6 C31 9.4 17 9.4 15 6 Z",
+      details: ["M15 6 L24 17 L33 6", "M6.5 24 H12", "M36 24 H41.5", "M29.5 25 h0.01", "M30.5 31.5 h0.01"],
+    },
+    accessoire: {
+      omtrek: "M17.5 16.5 L16.5 6 H31.5 L30.5 16.5 C33 18.4 34.5 21 34.5 24 C34.5 27 33 29.6 30.5 31.5 L31.5 42 H16.5 L17.5 31.5 C15 29.6 13.5 27 13.5 24 C13.5 21 15 18.4 17.5 16.5 Z",
+      details: ["M24 24 V19.5", "M24 24 H27.5", "M24 24 m-6.8 0 a6.8 6.8 0 1 0 13.6 0 a6.8 6.8 0 1 0 -13.6 0"],
+    },
   };
 
-  const CategorieIcoon = ({ categorie, grootte }) => (
-    <svg
-      width={grootte}
-      height={grootte}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="rgba(255,255,255,0.9)"
-      strokeWidth="1.8"
-      strokeLinejoin="round"
-      strokeLinecap="round"
-      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
-      style={{ mixBlendMode: "difference" }}
-    >
-      {CATEGORIE_PADEN[categorie] || CATEGORIE_PADEN.top}
-    </svg>
-  );
+  const vormVoorItem = (item) => {
+    if (item?.categorie === "top") return item.laag === "over" ? "trui" : "hemd";
+    return KLEDING_VORMEN[item?.categorie] ? item.categorie : "hemd";
+  };
+
+  const KledingIllustratie = ({ item, grootte }) => {
+    const vorm = KLEDING_VORMEN[vormVoorItem(item)];
+    const vlakken = itemKleuren(item).map(kleurInfo).filter(Boolean);
+    const kleurLijst = vlakken.length ? vlakken : [{ hex: "#C4C4C4" }];
+    const cid = "knip" + (item?.id || "x") + kleurLijst.length;
+    const baan = 48 / kleurLijst.length;
+    return (
+      <svg width={grootte} height={grootte} viewBox="0 0 48 48">
+        <defs>
+          <clipPath id={cid}>
+            <path d={vorm.omtrek} />
+          </clipPath>
+        </defs>
+        <g clipPath={`url(#${cid})`}>
+          {kleurLijst.map((k, i) => (
+            <rect key={i} x={i * baan} y="0" width={baan + 0.5} height="48" fill={k.hex} />
+          ))}
+        </g>
+        <g
+          fill="none"
+          stroke="rgba(255,255,255,0.9)"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          style={{ mixBlendMode: "difference" }}
+        >
+          <path d={vorm.omtrek} />
+          {vorm.details.map((d, i) => (
+            <path key={i} d={d} />
+          ))}
+        </g>
+      </svg>
+    );
+  };
 
   // Visueel blokje per kledingstuk: de foto als die er is, anders een
   // kleurvlak — bij meerdere kleuren als verticale strepen — met het
@@ -901,17 +921,13 @@ export default function GarderobeApp() {
         />
       );
     }
-    const vlakken = itemKleuren(item).map(kleurInfo).filter(Boolean);
     return (
       <span
-        className="rounded-lg shrink-0 relative flex overflow-hidden"
-        style={{ width: grootte, height: grootte, border: `1px solid ${KLEUREN.lijn}` }}
+        className="rounded-lg shrink-0 flex items-center justify-center"
+        style={{ width: grootte, height: grootte, border: `1px solid ${KLEUREN.lijn}`, background: "#F1EDE3" }}
         title={kleurenTekst(item)}
       >
-        {(vlakken.length ? vlakken : [{ hex: "#DDD" }]).map((k, i) => (
-          <span key={i} style={{ flex: 1, background: k.hex }} />
-        ))}
-        <CategorieIcoon categorie={item?.categorie} grootte={Math.round(grootte * 0.62)} />
+        <KledingIllustratie item={item} grootte={Math.round(grootte * 0.86)} />
       </span>
     );
   };
