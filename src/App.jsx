@@ -261,6 +261,25 @@ function normaliseerItem(it) {
   return basis;
 }
 
+// ---------- Accessoire-herkenning ----------
+// Herkent op naam wat een accessoire is ("pet", "sjaal", ...). Gebruikt
+// voor de tekening én door de generator om per soort hooguit één te kiezen.
+const ACCESSOIRE_TREFWOORDEN = [
+  { vorm: "sjaal", woorden: ["sjaal", "shawl", "scarf"] },
+  { vorm: "pet", woorden: ["pet", "cap"] },
+  { vorm: "muts", woorden: ["muts", "beanie"] },
+  { vorm: "riem", woorden: ["riem", "belt", "ceintuur"] },
+  { vorm: "zonnebril", woorden: ["zonnebril", "bril"] },
+  { vorm: "handschoen", woorden: ["handschoen", "want"] },
+  { vorm: "das", woorden: ["stropdas", "vlinderdas", "das"] },
+  { vorm: "horloge", woorden: ["horloge", "watch"] },
+];
+const accessoireVorm = (naam) => {
+  const n = (naam || "").toLowerCase();
+  const treffer = ACCESSOIRE_TREFWOORDEN.find((t) => t.woorden.some((w) => n.includes(w)));
+  return treffer ? treffer.vorm : "horloge";
+};
+
 // ---------- Stijlregels ----------
 const pasvormOk = (bovenRuim, broek) => !(bovenRuim && (broek.pasvorm || "regular") === "slim");
 
@@ -348,13 +367,23 @@ function genereerDag(items, dag, stijl, vermijden = new Set()) {
       ? kiesMetVoorkeur("jas", () => true, (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren))
       : undefined;
 
+  // Accessoires: meerdere per outfit, maar hooguit één per soort — wel een
+  // riem én een pet én een horloge, maar nooit twee riemen. Het weer filtert
+  // vanzelf mee via de temperatuurbanden (geen wollen sjaal bij 25 graden).
+  const accessoireSoorten = [...new Set(
+    items.filter((it) => it.categorie === "accessoire").map((it) => accessoireVorm(it.naam))
+  )];
+  const accessoires = accessoireSoorten
+    .map((soort) => kies("accessoire", (it) => accessoireVorm(it.naam) === soort))
+    .filter(Boolean);
+
   const outfit = {
     basislaag,
     overlaag,
     broek,
     schoenen: kies("schoenen"),
     jas,
-    accessoire: kies("accessoire") || undefined,
+    accessoires,
   };
 
   return { outfit, gebruikt: vandaag };
@@ -484,7 +513,7 @@ export default function GarderobeApp() {
   function registreerGedragen(dagIndex) {
     const dag = plan[dagIndex];
     if (!dag || dag.gedragen) return;
-    const gedragenIds = Object.values(dag.outfit).filter(Boolean).map((it) => it.id);
+    const gedragenIds = Object.values(dag.outfit).flat().filter(Boolean).map((it) => it.id);
     setItems((prev) =>
       prev.map((it) => {
         if (!gedragenIds.includes(it.id)) return it;
@@ -514,7 +543,7 @@ export default function GarderobeApp() {
     const vermijden = new Set();
     [plan[i - 1], plan[i + 1]].forEach((buurdag) => {
       if (!buurdag) return;
-      Object.values(buurdag.outfit).filter(Boolean).forEach((it) => vermijden.add(it.id));
+      Object.values(buurdag.outfit).flat().filter(Boolean).forEach((it) => vermijden.add(it.id));
     });
     const { outfit } = genereerDag(items, actueel, stijl, vermijden);
     setPlan((prev) =>
@@ -814,7 +843,6 @@ export default function GarderobeApp() {
     { sleutel: "broek", label: "Broek" },
     { sleutel: "schoenen", label: "Schoenen" },
     { sleutel: "jas", label: "Jas" },
-    { sleutel: "accessoire", label: "Accessoire" },
   ];
 
   // ---------- UI-onderdelen ----------
@@ -893,27 +921,11 @@ export default function GarderobeApp() {
     },
   };
 
-  // Trefwoorden waarmee een accessoire zijn eigen tekening krijgt: staat er
-  // "pet" in de naam, dan tekenen we een pet; "sjaal" wordt een sjaal, enz.
-  // Niets herkend? Dan is het horloge de nette standaard.
-  const ACCESSOIRE_TREFWOORDEN = [
-    { vorm: "sjaal", woorden: ["sjaal", "shawl", "scarf"] },
-    { vorm: "pet", woorden: ["pet", "cap"] },
-    { vorm: "muts", woorden: ["muts", "beanie"] },
-    { vorm: "riem", woorden: ["riem", "belt", "ceintuur"] },
-    { vorm: "zonnebril", woorden: ["zonnebril", "bril"] },
-    { vorm: "handschoen", woorden: ["handschoen", "want"] },
-    { vorm: "das", woorden: ["stropdas", "vlinderdas", "das"] },
-    { vorm: "horloge", woorden: ["horloge", "watch"] },
-  ];
+
 
   const vormVoorItem = (item) => {
     if (item?.categorie === "top") return item.laag === "over" ? "trui" : "hemd";
-    if (item?.categorie === "accessoire") {
-      const naam = (item.naam || "").toLowerCase();
-      const treffer = ACCESSOIRE_TREFWOORDEN.find((t) => t.woorden.some((w) => naam.includes(w)));
-      return treffer ? treffer.vorm : "horloge";
-    }
+    if (item?.categorie === "accessoire") return accessoireVorm(item.naam);
     return KLEDING_VORMEN[item?.categorie] ? item.categorie : "hemd";
   };
 
@@ -1209,6 +1221,23 @@ export default function GarderobeApp() {
                           </li>
                         );
                       })}
+                      {(dag.outfit.accessoires || (dag.outfit.accessoire ? [dag.outfit.accessoire] : [])).map((it) => (
+                        <li key={it.id} className="flex items-center gap-3 text-sm">
+                          <span className="w-20 shrink-0 uppercase text-xs tracking-wide" style={{ color: KLEUREN.grijs }}>Accessoire</span>
+                          <span className="flex items-center gap-3 min-w-0">
+                            <ItemBeeld item={it} grootte={44} />
+                            <span className="min-w-0">
+                              <span className="block truncate">
+                                {it.merk ? `${it.merk} — ` : ""}{it.naam}
+                              </span>
+                              <span className="block text-xs" style={{ color: KLEUREN.grijs }}>
+                                {kleurenTekst(it)}
+                                {it.patroon ? " · patroon" : ""}
+                              </span>
+                            </span>
+                          </span>
+                        </li>
+                      ))}
                     </ul>
                     <button
                       onClick={() => registreerGedragen(i)}
