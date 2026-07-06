@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Camera, Settings2, X, Download, Upload, Pencil } from "lucide-react";
+import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Settings2, X, Download, Upload, Pencil } from "lucide-react";
 
 // ---------- Constanten ----------
 const KLEUREN = {
@@ -206,30 +206,6 @@ const demoWeer = () => {
   });
 };
 
-// Verkleint een gekozen foto tot max 320px en comprimeert naar JPEG, zodat
-// tientallen foto's samen ruim binnen de localStorage-limiet (±5MB) blijven.
-function comprimeerFoto(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const MAX = 320;
-        const schaal = Math.min(1, MAX / Math.max(img.width, img.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(img.width * schaal);
-        canvas.height = Math.round(img.height * schaal);
-        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.72));
-      };
-      img.onerror = () => reject(new Error("Afbeelding onleesbaar"));
-      img.src = reader.result;
-    };
-    reader.onerror = () => reject(new Error("Bestand onleesbaar"));
-    reader.readAsDataURL(file);
-  });
-}
-
 // Zet een vrije naam om naar een kleur-id ("Olijfgroen" -> "olijfgroen")
 const naarId = (naam) =>
   naam.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-");
@@ -244,9 +220,11 @@ function normaliseerItem(it) {
     kleur: "anders",
     patroon: false,
     merk: "",
-    foto: null,
     ...it,
   };
+  // De fotofunctie is vervallen: eventueel eerder opgeslagen foto's worden
+  // hier weggegooid, zodat de opslag (en de Google Sheet) weer licht wordt.
+  delete basis.foto;
   // Oude items met een grove warmteklasse krijgen automatisch de
   // bijbehorende temperatuurbanden; niets hoeft opnieuw ingevoerd.
   if (!Array.isArray(basis.kleuren) || !basis.kleuren.length) {
@@ -416,10 +394,9 @@ export default function GarderobeApp() {
   const [nieuweStijl, setNieuweStijl] = useState("");
   const [nieuw, setNieuw] = useState({
     naam: "", merk: "", categorie: "top", laag: "basis", pasvorm: "regular",
-    kleuren: ["navy"], patroon: false, tempBanden: [...ALLE_BANDEN], stijl: "Modern preppy", maxDraag: 1, foto: null,
+    kleuren: ["navy"], patroon: false, tempBanden: [...ALLE_BANDEN], stijl: "Modern preppy", maxDraag: 1,
   });
   const eersteOpslag = useRef(true);
-  const nieuwFotoInput = useRef(null);
 
   // ---- Synchronisatie via Google Sheets (Apps Script) ----
   const [syncConfig, setSyncConfig] = useState({ url: "", geheim: "" });
@@ -462,8 +439,7 @@ export default function GarderobeApp() {
     } catch (e) { /* geen sync ingesteld */ }
   }, []);
 
-  // Opslaan bij wijzigingen. Foto's maken de data groter; als de opslag vol
-  // raakt, melden we dat in plaats van stilletjes te falen.
+  // Opslaan bij wijzigingen.
   useEffect(() => {
     if (!geladen) return;
     if (eersteOpslag.current) { eersteOpslag.current = false; return; }
@@ -471,7 +447,7 @@ export default function GarderobeApp() {
       localStorage.setItem(OPSLAG_SLEUTEL, JSON.stringify({ items, stijl, plan, kleuren, stijlen }));
     } catch (e) {
       console.error("Opslaan mislukt", e);
-      alert("Opslaan mislukt — waarschijnlijk is de browseropslag vol. Verwijder een paar foto's van kledingstukken en probeer opnieuw.");
+      alert("Opslaan mislukt — de browseropslag lijkt vol te zitten.");
     }
   }, [items, stijl, plan, kleuren, stijlen, geladen]);
 
@@ -566,8 +542,7 @@ export default function GarderobeApp() {
     };
     kaal.seizoenen = afleidSeizoenen(kaal);
     setItems((prev) => [...prev, kaal]);
-    setNieuw((n) => ({ ...n, naam: "", merk: "", foto: null }));
-    if (nieuwFotoInput.current) nieuwFotoInput.current.value = "";
+    setNieuw((n) => ({ ...n, naam: "", merk: "" }));
   }
 
   function verwijder(id) {
@@ -575,7 +550,7 @@ export default function GarderobeApp() {
   }
 
   function laadVoorbeeld() {
-    setItems(VOORBEELD_ITEMS.map((it) => normaliseerItem({ ...it, id: nieuwId(), vies: false, draagTeller: 0, foto: null, regenOk: it.regenOk !== false })));
+    setItems(VOORBEELD_ITEMS.map((it) => normaliseerItem({ ...it, id: nieuwId(), vies: false, draagTeller: 0, regenOk: it.regenOk !== false })));
   }
 
   // ---- Seizoenen: filter en handmatig bijstellen ----
@@ -641,28 +616,6 @@ export default function GarderobeApp() {
         return nieuwLijst.length ? { ...it, tempBanden: nieuwLijst } : it;
       })
     );
-  }
-
-  async function kiesNieuweFoto(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const foto = await comprimeerFoto(file);
-      setNieuw((n) => ({ ...n, foto }));
-    } catch (err) {
-      alert("Foto kon niet gelezen worden.");
-    }
-  }
-
-  async function wijzigItemFoto(id, e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const foto = await comprimeerFoto(file);
-      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, foto } : it)));
-    } catch (err) {
-      alert("Foto kon niet gelezen worden.");
-    }
   }
 
   // ---- Beheer van kleuren en stijlen ----
@@ -803,7 +756,7 @@ export default function GarderobeApp() {
   }, [items, stijl, plan, kleuren, stijlen]);
 
   // ---- Overzetten tussen apparaten (handmatige synchronisatie) ----
-  // Exporteert de volledige kast (incl. foto's, kleuren, stijlen en het
+  // Exporteert de volledige kast (incl. kleuren, stijlen en het
   // lopende plan) als één bestand dat je op een ander apparaat importeert.
   function exporteerData() {
     const data = JSON.stringify({ items, stijl, plan, kleuren, stijlen }, null, 2);
@@ -875,9 +828,33 @@ export default function GarderobeApp() {
       omtrek: "M16 7.5 L6.5 11.5 V29.5 H12 V41 H36 V29.5 H41.5 V11.5 L32 7.5 C30 11 18 11 16 7.5 Z",
       details: ["M18 8.4 C19.5 11.6 28.5 11.6 30 8.4", "M12 37.4 H36", "M6.5 26 H12", "M36 26 H41.5"],
     },
+    tshirt: {
+      omtrek: "M16 8 L7 12 L9.5 19 L14 17 V40 H34 V17 L38.5 19 L41 12 L32 8 C30 11.4 18 11.4 16 8 Z",
+      details: ["M18.5 8.9 C20 11.6 28 11.6 29.5 8.9", "M14 17 L9.5 19", "M34 17 L38.5 19"],
+    },
+    polo: {
+      omtrek: "M16 8 L7 12 L9.5 19 L14 17 V40 H34 V17 L38.5 19 L41 12 L32 8 C30 11.4 18 11.4 16 8 Z",
+      details: ["M18.5 8.5 L24 14.5 L29.5 8.5", "M24 14.5 V22", "M14 17 L9.5 19", "M34 17 L38.5 19"],
+    },
+    hoodie: {
+      omtrek: "M16 9 L6.5 13 V30.5 H12 V41 H36 V30.5 H41.5 V13 L32 9 C32 5.2 16 5.2 16 9 Z",
+      details: ["M17.5 10 C19.5 13.4 28.5 13.4 30.5 10", "M22 13.6 V17.5", "M26 13.6 V17.5", "M18 41 V33.5 H30 V41", "M6.5 27 H12", "M36 27 H41.5"],
+    },
+    vest: {
+      omtrek: "M16 7.5 L6.5 11.5 V29.5 H12 V41 H36 V29.5 H41.5 V11.5 L32 7.5 C30 11 18 11 16 7.5 Z",
+      details: ["M18 8.4 L24 20 V41", "M30 8.4 L24 20", "M24 25 h0.01", "M24 30.5 h0.01", "M24 36 h0.01", "M6.5 26 H12", "M36 26 H41.5"],
+    },
     broek: {
       omtrek: "M14 7 H34 L36.8 41 H27.6 L24 19.5 L20.4 41 H11.2 Z",
       details: ["M14 11.8 H34", "M24 7 V11.8"],
+    },
+    short: {
+      omtrek: "M13.5 11 H34.5 L36.2 29 H27.2 L24 19 L20.8 29 H11.8 Z",
+      details: ["M13.5 15.4 H34.5", "M24 11 V15.4"],
+    },
+    rok: {
+      omtrek: "M16 10 H32 L38 38 H10 Z",
+      details: ["M16 13.8 H32", "M20 13.8 L17.2 38", "M24 13.8 V38", "M28 13.8 L30.8 38"],
     },
     schoenen: {
       omtrek: "M9 34.5 C7.8 28 10 19.5 13.5 16.5 L19.5 23 C23.5 27 31.5 28 37.5 30 C41 31.2 42.2 33.2 41.6 34.5 Z",
@@ -886,6 +863,10 @@ export default function GarderobeApp() {
     jas: {
       omtrek: "M15 6 L6.5 10 V42 H20.5 L24 17 L27.5 42 H41.5 V10 L33 6 C31 9.4 17 9.4 15 6 Z",
       details: ["M15 6 L24 17 L33 6", "M6.5 24 H12", "M36 24 H41.5", "M29.5 25 h0.01", "M30.5 31.5 h0.01"],
+    },
+    jack: {
+      omtrek: "M15 7 L6.5 11 V36 H41.5 V11 L33 7 C31 10.2 17 10.2 15 7 Z",
+      details: ["M15 7 L24 12.5 L33 7", "M24 12.5 V36", "M6.5 31.5 H41.5", "M12 25 H16.5", "M31.5 25 H36"],
     },
     horloge: {
       omtrek: "M17.5 16.5 L16.5 6 H31.5 L30.5 16.5 C33 18.4 34.5 21 34.5 24 C34.5 27 33 29.6 30.5 31.5 L31.5 42 H16.5 L17.5 31.5 C15 29.6 13.5 27 13.5 24 C13.5 21 15 18.4 17.5 16.5 Z",
@@ -923,8 +904,34 @@ export default function GarderobeApp() {
 
 
 
+  // Trefwoorden per categorie: de naam bepaalt de tekening. Volgorde telt —
+  // "sweatshirt" moet trui worden, niet t-shirt, dus specifieke woorden eerst.
+  const TOP_TREFWOORDEN = [
+    { vorm: "polo", woorden: ["polo"] },
+    { vorm: "hoodie", woorden: ["hoodie", "capuchon"] },
+    { vorm: "vest", woorden: ["vest", "cardigan"] },
+    { vorm: "trui", woorden: ["trui", "sweater", "sweatshirt", "pullover"] },
+    { vorm: "tshirt", woorden: ["t-shirt", "tshirt", "tee"] },
+    { vorm: "hemd", woorden: ["overhemd", "hemd", "blouse"] },
+  ];
+  const BROEK_TREFWOORDEN = [
+    { vorm: "short", woorden: ["short", "korte broek"] },
+    { vorm: "rok", woorden: ["rok"] },
+  ];
+  const JAS_TREFWOORDEN = [
+    { vorm: "jack", woorden: ["jack", "bomber", "harrington", "windjack"] },
+  ];
+  const zoekVorm = (lijst, naam) => {
+    const n = (naam || "").toLowerCase();
+    return lijst.find((t) => t.woorden.some((w) => n.includes(w)))?.vorm;
+  };
+
   const vormVoorItem = (item) => {
-    if (item?.categorie === "top") return item.laag === "over" ? "trui" : "hemd";
+    if (item?.categorie === "top") {
+      return zoekVorm(TOP_TREFWOORDEN, item.naam) || (item.laag === "over" ? "trui" : "hemd");
+    }
+    if (item?.categorie === "broek") return zoekVorm(BROEK_TREFWOORDEN, item.naam) || "broek";
+    if (item?.categorie === "jas") return zoekVorm(JAS_TREFWOORDEN, item.naam) || "jas";
     if (item?.categorie === "accessoire") return accessoireVorm(item.naam);
     return KLEDING_VORMEN[item?.categorie] ? item.categorie : "hemd";
   };
@@ -970,16 +977,6 @@ export default function GarderobeApp() {
   // altijd als tekst bij, zodat je nooit alleen op kleurherkenning hoeft
   // te vertrouwen.
   const ItemBeeld = ({ item, grootte = 44 }) => {
-    if (item?.foto) {
-      return (
-        <img
-          src={item.foto}
-          alt={item.naam}
-          className="rounded-lg object-cover shrink-0"
-          style={{ width: grootte, height: grootte, border: `1px solid ${KLEUREN.lijn}` }}
-        />
-      );
-    }
     return (
       <span
         className="rounded-lg shrink-0 flex items-center justify-center"
@@ -1378,25 +1375,8 @@ export default function GarderobeApp() {
                 })}
               </div>
 
-              {/* Foto + toevoegen */}
-              <div className="flex flex-wrap items-center gap-3">
-                <label
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer"
-                  style={{ border: `1.5px dashed ${KLEUREN.lijn}`, background: KLEUREN.ivoor }}
-                >
-                  <Camera size={16} />
-                  {nieuw.foto ? "Andere foto kiezen" : "Foto toevoegen (optioneel)"}
-                  <input ref={nieuwFotoInput} type="file" accept="image/*" onChange={kiesNieuweFoto} className="hidden" />
-                </label>
-                {nieuw.foto && (
-                  <span className="flex items-center gap-2">
-                    <img src={nieuw.foto} alt="Voorbeeld" className="w-11 h-11 rounded-lg object-cover" style={{ border: `1px solid ${KLEUREN.lijn}` }} />
-                    <button onClick={() => setNieuw((n) => ({ ...n, foto: null }))} title="Foto verwijderen" style={{ color: KLEUREN.grijs }}>
-                      <X size={16} />
-                    </button>
-                  </span>
-                )}
-                <button onClick={voegToe} className="flex items-center gap-1 px-4 py-2 rounded-lg text-sm font-medium ml-auto" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
+              <div className="flex justify-end">
+                <button onClick={voegToe} className="flex items-center gap-1 px-4 py-2 rounded-lg text-sm font-medium" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
                   <Plus size={16} /> Toevoegen
                 </button>
               </div>
@@ -1641,10 +1621,6 @@ export default function GarderobeApp() {
                           >
                             <Pencil size={15} />
                           </button>
-                          <label className="cursor-pointer shrink-0" title="Foto toevoegen of wijzigen" style={{ color: KLEUREN.grijs }}>
-                            <Camera size={15} />
-                            <input type="file" accept="image/*" onChange={(e) => wijzigItemFoto(it.id, e)} className="hidden" />
-                          </label>
                           <button onClick={() => verwijder(it.id)} title="Verwijderen" className="shrink-0" style={{ color: KLEUREN.grijs }}>
                             <Trash2 size={15} />
                           </button>
