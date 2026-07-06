@@ -567,6 +567,25 @@ export default function GarderobeApp() {
     );
   }
 
+  function wijzigCategorie(itemId, categorie) {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId || it.categorie === categorie) return it;
+        // Wordt het een bovenstuk, dan hoort er een laag bij (standaard basis);
+        // wordt het iets anders, dan vervalt de laag juist.
+        return {
+          ...it,
+          categorie,
+          laag: categorie === "top" ? (it.laag || "basis") : undefined,
+        };
+      })
+    );
+  }
+
+  function wijzigLaag(itemId, laag) {
+    setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, laag } : it)));
+  }
+
   function wisselKleur(itemId, kleurId) {
     setItems((prev) =>
       prev.map((it) => {
@@ -1512,6 +1531,48 @@ export default function GarderobeApp() {
                                   );
                                 })}
                               </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs mr-1" style={{ color: KLEUREN.grijs }}>Categorie:</span>
+                                {CATEGORIEEN.map((c) => {
+                                  const aan = it.categorie === c.id;
+                                  return (
+                                    <button
+                                      key={c.id}
+                                      onClick={() => wijzigCategorie(it.id, c.id)}
+                                      className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
+                                      style={{
+                                        background: aan ? KLEUREN.bordeaux : KLEUREN.wit,
+                                        color: aan ? KLEUREN.ivoor : KLEUREN.grijs,
+                                        border: `1.5px solid ${aan ? KLEUREN.bordeaux : KLEUREN.lijn}`,
+                                      }}
+                                    >
+                                      {aan && <Check size={11} />}{c.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {it.categorie === "top" && (
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-xs mr-1" style={{ color: KLEUREN.grijs }}>Laag:</span>
+                                  {LAGEN.map((l) => {
+                                    const aan = (it.laag || "basis") === l.id;
+                                    return (
+                                      <button
+                                        key={l.id}
+                                        onClick={() => wijzigLaag(it.id, l.id)}
+                                        className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
+                                        style={{
+                                          background: aan ? KLEUREN.bordeaux : KLEUREN.wit,
+                                          color: aan ? KLEUREN.ivoor : KLEUREN.grijs,
+                                          border: `1.5px solid ${aan ? KLEUREN.bordeaux : KLEUREN.lijn}`,
+                                        }}
+                                      >
+                                        {aan && <Check size={11} />}{l.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
                               <div className="flex flex-wrap items-center gap-1.5">
                                 <span className="text-xs mr-1" style={{ color: KLEUREN.grijs }}>Kleur(en):</span>
                                 {kleuren.map((k) => {
