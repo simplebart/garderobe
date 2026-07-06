@@ -859,14 +859,61 @@ export default function GarderobeApp() {
       omtrek: "M15 6 L6.5 10 V42 H20.5 L24 17 L27.5 42 H41.5 V10 L33 6 C31 9.4 17 9.4 15 6 Z",
       details: ["M15 6 L24 17 L33 6", "M6.5 24 H12", "M36 24 H41.5", "M29.5 25 h0.01", "M30.5 31.5 h0.01"],
     },
-    accessoire: {
+    horloge: {
       omtrek: "M17.5 16.5 L16.5 6 H31.5 L30.5 16.5 C33 18.4 34.5 21 34.5 24 C34.5 27 33 29.6 30.5 31.5 L31.5 42 H16.5 L17.5 31.5 C15 29.6 13.5 27 13.5 24 C13.5 21 15 18.4 17.5 16.5 Z",
       details: ["M24 24 V19.5", "M24 24 H27.5", "M24 24 m-6.8 0 a6.8 6.8 0 1 0 13.6 0 a6.8 6.8 0 1 0 -13.6 0"],
     },
+    sjaal: {
+      omtrek: "M13.5 12 C13.5 7.5 34.5 7.5 34.5 12 C34.5 15.6 30 17.6 26.5 18 L30.5 40 H21.5 L23 18 C18.5 17.8 13.5 15.8 13.5 12 Z",
+      details: ["M15.5 10.2 C19 13 29 13 32.5 10.2", "M23.6 40 V36.5", "M26 40 V36.5", "M28.4 40 V36.5"],
+    },
+    pet: {
+      omtrek: "M9.5 27.5 C9.5 16.5 16 9.5 24.5 9.5 C32.5 9.5 38.7 15.8 39.2 25 L44.2 27.8 C45.9 28.7 45.1 31.5 43 31.5 H13.5 C11 31.5 9.5 30 9.5 27.5 Z",
+      details: ["M24.5 9.5 L22.5 31.5", "M39.2 25 C33 27 21 27.8 12 27.2"],
+    },
+    muts: {
+      omtrek: "M20.6 7.4 a3.4 3.4 0 1 1 6.8 0 a3.4 3.4 0 1 1 -6.8 0 Z M12 30 C12 19 17 11.6 24 11.6 C31 11.6 36 19 36 30 V35.5 H12 Z",
+      details: ["M12 29.5 H36", "M17.5 29.5 V35.5", "M24 29.5 V35.5", "M30.5 29.5 V35.5"],
+    },
+    riem: {
+      omtrek: "M7 18 H15 V30 H7 C5.2 30 5.2 18 7 18 Z M15 20.7 H40.5 C42.3 20.7 42.3 27.3 40.5 27.3 H15 Z",
+      details: ["M11 18 V24.5", "M33.5 24 h0.01", "M36.8 24 h0.01"],
+    },
+    zonnebril: {
+      omtrek: "M8 20.5 C8 17.3 11 15.5 15 15.5 C19.5 15.5 22 17.7 22 21.2 C22 25.7 19 28.8 15 28.8 C11 28.8 8 25.3 8 20.5 Z M26 21.2 C26 17.7 28.5 15.5 33 15.5 C37 15.5 40 17.3 40 20.5 C40 25.3 37 28.8 33 28.8 C29 28.8 26 25.7 26 21.2 Z",
+      details: ["M22 19.4 C23 18.3 25 18.3 26 19.4", "M8 18.6 L4.2 16.8", "M40 18.6 L43.8 16.8"],
+    },
+    handschoen: {
+      omtrek: "M17 40 V22.5 C13.4 21.3 11.8 16.8 14.4 14.2 C15.9 12.7 18 13.2 19 15 C20.4 11 23 9 26.2 9 C31.2 9 34.4 13 34.4 19.5 V40 Z",
+      details: ["M17 33.5 H34.4", "M23.5 15 V26", "M28.5 13.5 V26"],
+    },
+    das: {
+      omtrek: "M20 7 H28 L26.6 12.5 L30 31.5 L24 40 L18 31.5 L21.4 12.5 Z",
+      details: ["M21.4 12.5 H26.6"],
+    },
   };
+
+  // Trefwoorden waarmee een accessoire zijn eigen tekening krijgt: staat er
+  // "pet" in de naam, dan tekenen we een pet; "sjaal" wordt een sjaal, enz.
+  // Niets herkend? Dan is het horloge de nette standaard.
+  const ACCESSOIRE_TREFWOORDEN = [
+    { vorm: "sjaal", woorden: ["sjaal", "shawl", "scarf"] },
+    { vorm: "pet", woorden: ["pet", "cap"] },
+    { vorm: "muts", woorden: ["muts", "beanie"] },
+    { vorm: "riem", woorden: ["riem", "belt", "ceintuur"] },
+    { vorm: "zonnebril", woorden: ["zonnebril", "bril"] },
+    { vorm: "handschoen", woorden: ["handschoen", "want"] },
+    { vorm: "das", woorden: ["stropdas", "vlinderdas", "das"] },
+    { vorm: "horloge", woorden: ["horloge", "watch"] },
+  ];
 
   const vormVoorItem = (item) => {
     if (item?.categorie === "top") return item.laag === "over" ? "trui" : "hemd";
+    if (item?.categorie === "accessoire") {
+      const naam = (item.naam || "").toLowerCase();
+      const treffer = ACCESSOIRE_TREFWOORDEN.find((t) => t.woorden.some((w) => naam.includes(w)));
+      return treffer ? treffer.vorm : "horloge";
+    }
     return KLEDING_VORMEN[item?.categorie] ? item.categorie : "hemd";
   };
 
