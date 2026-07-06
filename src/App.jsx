@@ -249,6 +249,9 @@ function normaliseerItem(it) {
   };
   // Oude items met een grove warmteklasse krijgen automatisch de
   // bijbehorende temperatuurbanden; niets hoeft opnieuw ingevoerd.
+  if (!Array.isArray(basis.kleuren) || !basis.kleuren.length) {
+    basis.kleuren = [basis.kleur || "anders"];
+  }
   if (!Array.isArray(basis.tempBanden) || !basis.tempBanden.length) {
     basis.tempBanden = WARMTE_NAAR_BANDEN[basis.warmte] || ALLE_BANDEN;
   }
@@ -261,11 +264,21 @@ function normaliseerItem(it) {
 // ---------- Stijlregels ----------
 const pasvormOk = (bovenRuim, broek) => !(bovenRuim && (broek.pasvorm || "regular") === "slim");
 
+// Items kunnen meerdere kleuren hebben (bijv. een sjaal in rood, blauw en
+// wit). Twee stukken botsen als ze allebei effen (een kleur) zijn en dezelfde
+// kleur hebben (navy trui op navy chino), of als een kleurpaar uit de
+// clash-lijst tussen beide voorkomt. Meerkleurige stukken krijgen
+// vrijstelling van de zelfde-kleur-regel: navy/witte streep op een navy
+// chino is juist klassiek. "Anders / gemengd" botst nooit.
 const KLEUR_CLASHES = [["navy", "zwart"], ["bruin", "zwart"]];
 const kleurenBotsen = (a, b) => {
-  if (!a || !b || a === "anders" || b === "anders") return false;
-  if (a === b) return true;
-  return KLEUR_CLASHES.some((p) => p.includes(a) && p.includes(b));
+  const A = (Array.isArray(a) ? a : [a]).filter((k) => k && k !== "anders");
+  const B = (Array.isArray(b) ? b : [b]).filter((k) => k && k !== "anders");
+  if (!A.length || !B.length) return false;
+  if (A.length === 1 && B.length === 1 && A[0] === B[0]) return true;
+  return A.some((x) =>
+    B.some((y) => x !== y && KLEUR_CLASHES.some((p) => p.includes(x) && p.includes(y)))
+  );
 };
 
 // ---------- Outfitgenerator ----------
@@ -316,7 +329,7 @@ function genereerDag(items, dag, stijl, vermijden = new Set()) {
       ? kiesMetVoorkeur(
           "top",
           (it) => it.laag === "over",
-          (it) => !kleurenBotsen(it.kleur, basislaag?.kleur) && !(it.patroon && basislaag?.patroon)
+          (it) => !kleurenBotsen(it.kleuren, basislaag?.kleuren) && !(it.patroon && basislaag?.patroon)
         )
       : undefined;
 
@@ -327,12 +340,12 @@ function genereerDag(items, dag, stijl, vermijden = new Set()) {
   const broek = kiesMetVoorkeur(
     "broek",
     (it) => pasvormOk(bovenRuim, it),
-    (it) => !kleurenBotsen(it.kleur, buitensteTop?.kleur) && !(it.patroon && patronenBoven >= 1)
+    (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) && !(it.patroon && patronenBoven >= 1)
   );
 
   const jas =
     dag.temp < 15 || regent
-      ? kiesMetVoorkeur("jas", () => true, (it) => !kleurenBotsen(it.kleur, buitensteTop?.kleur))
+      ? kiesMetVoorkeur("jas", () => true, (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren))
       : undefined;
 
   const outfit = {
@@ -374,7 +387,7 @@ export default function GarderobeApp() {
   const [nieuweStijl, setNieuweStijl] = useState("");
   const [nieuw, setNieuw] = useState({
     naam: "", merk: "", categorie: "top", laag: "basis", pasvorm: "regular",
-    kleur: "navy", patroon: false, tempBanden: [...ALLE_BANDEN], stijl: "Modern preppy", maxDraag: 1, foto: null,
+    kleuren: ["navy"], patroon: false, tempBanden: [...ALLE_BANDEN], stijl: "Modern preppy", maxDraag: 1, foto: null,
   });
   const eersteOpslag = useRef(true);
   const nieuwFotoInput = useRef(null);
@@ -554,6 +567,20 @@ export default function GarderobeApp() {
     );
   }
 
+  function wisselKleur(itemId, kleurId) {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== itemId) return it;
+        const huidig = it.kleuren?.length ? it.kleuren : [it.kleur].filter(Boolean);
+        const nieuwLijst = huidig.includes(kleurId)
+          ? huidig.filter((k) => k !== kleurId)
+          : [...huidig, kleurId];
+        // Minstens een kleur laten staan.
+        return nieuwLijst.length ? { ...it, kleuren: nieuwLijst } : it;
+      })
+    );
+  }
+
   function wisselTempBand(itemId, band) {
     setItems((prev) =>
       prev.map((it) => {
@@ -604,7 +631,7 @@ export default function GarderobeApp() {
   }
 
   function verwijderKleur(id) {
-    const inGebruik = items.filter((it) => it.kleur === id).length;
+    const inGebruik = items.filter((it) => it.kleuren?.includes(id)).length;
     if (inGebruik > 0) {
       alert(`Deze kleur is in gebruik bij ${inGebruik} kledingstuk(ken). Wijzig die eerst.`);
       return;
@@ -784,10 +811,14 @@ export default function GarderobeApp() {
   const pasvormLabel = (id) => PASVORMEN.find((p) => p.id === id)?.label || "Regular";
   const kleurInfo = (id) => kleuren.find((k) => k.id === id);
   const kleurNaam = (id) => kleurInfo(id)?.label || id || "onbekend";
+  const itemKleuren = (item) => (item?.kleuren?.length ? item.kleuren : [item?.kleur].filter(Boolean));
+  const kleurenTekst = (item) => itemKleuren(item).map(kleurNaam).join(" · ") || "onbekend";
 
   // Visueel blokje per kledingstuk: de foto als die er is, anders een
-  // kleurvlak. De kleurnáám staat er altijd als tekst bij in de lijsten,
-  // zodat je nooit alleen op kleurherkenning hoeft te vertrouwen.
+  // kleurvlak — bij meerdere kleuren als verticale strepen, zodat je in
+  // een oogopslag ziet dat het een meerkleurig stuk is. De kleurnamen
+  // staan er in de lijsten altijd als tekst bij, zodat je nooit alleen
+  // op kleurherkenning hoeft te vertrouwen.
   const ItemBeeld = ({ item, grootte = 44 }) => {
     if (item?.foto) {
       return (
@@ -799,18 +830,50 @@ export default function GarderobeApp() {
         />
       );
     }
-    const info = kleurInfo(item?.kleur);
+    const vlakken = itemKleuren(item).map(kleurInfo).filter(Boolean);
     return (
       <span
-        className="rounded-lg shrink-0 flex items-center justify-center"
-        style={{ width: grootte, height: grootte, background: info?.hex || "#DDD", border: `1px solid ${KLEUREN.lijn}` }}
-        title={kleurNaam(item?.kleur)}
+        className="rounded-lg shrink-0 relative flex overflow-hidden"
+        style={{ width: grootte, height: grootte, border: `1px solid ${KLEUREN.lijn}` }}
+        title={kleurenTekst(item)}
       >
-        <Shirt size={Math.round(grootte * 0.45)} style={{ color: "rgba(255,255,255,0.85)", mixBlendMode: "difference" }} />
+        {(vlakken.length ? vlakken : [{ hex: "#DDD" }]).map((k, i) => (
+          <span key={i} style={{ flex: 1, background: k.hex }} />
+        ))}
+        <Shirt
+          size={Math.round(grootte * 0.45)}
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+          style={{ color: "rgba(255,255,255,0.85)", mixBlendMode: "difference" }}
+        />
       </span>
     );
   };
 
+  // Het logo: een collegiate wapenschild met kledinghanger en de
+  // rugbystrepen uit de kopbalk. Puur SVG, dus scherp op elk formaat.
+  const Logo = ({ grootte = 48 }) => (
+    <svg width={grootte} height={grootte} viewBox="0 0 64 64" aria-hidden="true" className="shrink-0">
+      <defs>
+        <clipPath id="schild-clip">
+          <path d="M32 3 L57 11 V31 C57 45 46.5 55 32 61 C17.5 55 7 45 7 31 V11 Z" />
+        </clipPath>
+      </defs>
+      <path d="M32 3 L57 11 V31 C57 45 46.5 55 32 61 C17.5 55 7 45 7 31 V11 Z" fill={KLEUREN.navy} />
+      <g clipPath="url(#schild-clip)">
+        <rect x="0" y="44" width="64" height="5" fill={KLEUREN.bordeaux} />
+        <rect x="0" y="51" width="64" height="4" fill={KLEUREN.goud} />
+      </g>
+      <path
+        d="M32 21 v-2.5 a4 4 0 1 1 4 -4"
+        fill="none" stroke={KLEUREN.ivoor} strokeWidth="2.6" strokeLinecap="round"
+      />
+      <path
+        d="M32 21 L48.5 33.5 a2 2 0 0 1 -1.2 3.6 H16.7 a2 2 0 0 1 -1.2 -3.6 Z"
+        fill="none" stroke={KLEUREN.ivoor} strokeWidth="2.6" strokeLinejoin="round"
+      />
+      <path d="M32 3 L57 11 V31 C57 45 46.5 55 32 61 C17.5 55 7 45 7 31 V11 Z" fill="none" stroke={KLEUREN.goud} strokeWidth="2" />
+    </svg>
+  );
   return (
     <div style={{ minHeight: "100vh", background: KLEUREN.ivoor, fontFamily: "'Avenir Next', 'Segoe UI', sans-serif", color: KLEUREN.navy }}>
       {/* Rugbystreep — het signatuurelement */}
@@ -824,13 +887,16 @@ export default function GarderobeApp() {
 
       <div className="max-w-3xl mx-auto px-4 pb-16">
         <header className="pt-8 pb-6 flex items-end justify-between flex-wrap gap-4">
-          <div>
-            <p className="uppercase tracking-widest text-xs mb-1" style={{ color: KLEUREN.bordeaux, letterSpacing: "0.2em" }}>
-              Persoonlijke garderobe
-            </p>
-            <h1 style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "2.2rem", lineHeight: 1.1 }}>
-              De Kledingkast
-            </h1>
+          <div className="flex items-center gap-3">
+            <Logo grootte={52} />
+            <div>
+              <p className="uppercase tracking-widest text-xs mb-1" style={{ color: KLEUREN.bordeaux, letterSpacing: "0.2em" }}>
+                Persoonlijke garderobe
+              </p>
+              <h1 style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "2.2rem", lineHeight: 1.1 }}>
+                De Kledingkast
+              </h1>
+            </div>
           </div>
           <button
             onClick={wasAlles}
@@ -1001,7 +1067,7 @@ export default function GarderobeApp() {
                                     {it.merk ? `${it.merk} — ` : ""}{it.naam}
                                   </span>
                                   <span className="block text-xs" style={{ color: KLEUREN.grijs }}>
-                                    {kleurNaam(it.kleur)}
+                                    {kleurenTekst(it)}
                                     {(it.pasvorm || "regular") !== "regular" ? ` · ${pasvormLabel(it.pasvorm).toLowerCase()}` : ""}
                                     {it.patroon ? " · patroon" : ""}
                                   </span>
@@ -1123,15 +1189,21 @@ export default function GarderobeApp() {
                 </button>
               </div>
 
-              {/* Kleurkeuze: grote klikbare vlakken mét naam, in plaats van een dropdown */}
-              <p className="text-xs uppercase tracking-wide mb-1.5" style={{ color: KLEUREN.grijs }}>Kleur</p>
+              {/* Kleurkeuze: grote klikbare vlakken met naam — meerdere mogelijk,
+                  bijv. een sjaal in rood + navy + wit. Minstens een blijft aan. */}
+              <p className="text-xs uppercase tracking-wide mb-1.5" style={{ color: KLEUREN.grijs }}>Kleur(en) — meerdere mogelijk</p>
               <div className="flex flex-wrap gap-1.5 mb-3">
                 {kleuren.map((k) => {
-                  const actief = nieuw.kleur === k.id;
+                  const actief = nieuw.kleuren.includes(k.id);
                   return (
                     <button
                       key={k.id}
-                      onClick={() => setNieuw({ ...nieuw, kleur: k.id })}
+                      onClick={() =>
+                        setNieuw((n) => {
+                          const lijst = actief ? n.kleuren.filter((x) => x !== k.id) : [...n.kleuren, k.id];
+                          return { ...n, kleuren: lijst.length ? lijst : n.kleuren };
+                        })
+                      }
                       className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-full text-xs font-medium"
                       style={{
                         border: actief ? `2px solid ${KLEUREN.navy}` : `1.5px solid ${KLEUREN.lijn}`,
@@ -1383,7 +1455,7 @@ export default function GarderobeApp() {
                               {it.merk ? `${it.merk} — ` : ""}{it.naam}
                             </span>
                             <span className="block text-xs" style={{ color: KLEUREN.grijs }}>
-                              {kleurNaam(it.kleur)}
+                              {kleurenTekst(it)}
                               {it.categorie === "top" ? ` · ${it.laag === "over" ? "overlaag" : "basislaag"}` : ""}
                               {` · ${pasvormLabel(it.pasvorm).toLowerCase()}`}
                               {it.patroon ? " · patroon" : ""}
@@ -1436,6 +1508,28 @@ export default function GarderobeApp() {
                                       }}
                                     >
                                       {aan && <Check size={11} />}{s.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs mr-1" style={{ color: KLEUREN.grijs }}>Kleur(en):</span>
+                                {kleuren.map((k) => {
+                                  const aan = itemKleuren(it).includes(k.id);
+                                  return (
+                                    <button
+                                      key={k.id}
+                                      onClick={() => wisselKleur(it.id, k.id)}
+                                      className="flex items-center gap-1 pl-1 pr-2 py-1 rounded-full text-xs font-medium"
+                                      style={{
+                                        border: aan ? `2px solid ${KLEUREN.navy}` : `1.5px solid ${KLEUREN.lijn}`,
+                                        background: aan ? "#EDF0F7" : KLEUREN.wit,
+                                        color: aan ? KLEUREN.navy : KLEUREN.grijs,
+                                      }}
+                                    >
+                                      <span className="w-4 h-4 rounded-full" style={{ background: k.hex, border: `1px solid ${KLEUREN.lijn}` }} />
+                                      {k.label}
+                                      {aan && <Check size={11} />}
                                     </button>
                                   );
                                 })}
