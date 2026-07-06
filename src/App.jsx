@@ -833,11 +833,63 @@ export default function GarderobeApp() {
   const itemKleuren = (item) => (item?.kleuren?.length ? item.kleuren : [item?.kleur].filter(Boolean));
   const kleurenTekst = (item) => itemKleuren(item).map(kleurNaam).join(" · ") || "onbekend";
 
+  // Elk categorietype heeft zijn eigen silhouet, in dezelfde lijnstijl als
+  // het logo. Zo zie je in een oogopslag of iets een broek, schoen of jas is,
+  // ook zonder foto. Getekend als simpele paden op een 24x24-raster.
+  const CATEGORIE_PADEN = {
+    top: (
+      <>
+        <path d="M8 4 L4.5 7.5 L7 10 V20 H17 V10 L19.5 7.5 L16 4 C14.5 5.6 9.5 5.6 8 4 Z" />
+      </>
+    ),
+    broek: (
+      <>
+        <path d="M7 4 H17 L18.5 20 H14.3 L12 10.5 L9.7 20 H5.5 Z" />
+        <path d="M7 7.5 H17" />
+      </>
+    ),
+    schoenen: (
+      <>
+        <path d="M5.5 6 H11 V11 L16.5 13.5 C18.6 14.4 20 15.6 20 17 V18.5 H5.5 Z" />
+        <path d="M5.5 15.5 H20" />
+      </>
+    ),
+    jas: (
+      <>
+        <path d="M8.5 4 L5.5 6.5 V20 H11 L12 8.5 L13 20 H18.5 V6.5 L15.5 4 C14 6 10 6 8.5 4 Z" />
+        <path d="M8.5 4 L12 8.5 L15.5 4" />
+      </>
+    ),
+    accessoire: (
+      <>
+        <circle cx="12" cy="12" r="4.2" />
+        <path d="M9.8 8.2 V4 H14.2 V8.2 M9.8 15.8 V20 H14.2 V15.8" />
+      </>
+    ),
+  };
+
+  const CategorieIcoon = ({ categorie, grootte }) => (
+    <svg
+      width={grootte}
+      height={grootte}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="rgba(255,255,255,0.9)"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+      strokeLinecap="round"
+      className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+      style={{ mixBlendMode: "difference" }}
+    >
+      {CATEGORIE_PADEN[categorie] || CATEGORIE_PADEN.top}
+    </svg>
+  );
+
   // Visueel blokje per kledingstuk: de foto als die er is, anders een
-  // kleurvlak — bij meerdere kleuren als verticale strepen, zodat je in
-  // een oogopslag ziet dat het een meerkleurig stuk is. De kleurnamen
-  // staan er in de lijsten altijd als tekst bij, zodat je nooit alleen
-  // op kleurherkenning hoeft te vertrouwen.
+  // kleurvlak — bij meerdere kleuren als verticale strepen — met het
+  // silhouet van de categorie erop. De kleurnamen staan er in de lijsten
+  // altijd als tekst bij, zodat je nooit alleen op kleurherkenning hoeft
+  // te vertrouwen.
   const ItemBeeld = ({ item, grootte = 44 }) => {
     if (item?.foto) {
       return (
@@ -859,11 +911,7 @@ export default function GarderobeApp() {
         {(vlakken.length ? vlakken : [{ hex: "#DDD" }]).map((k, i) => (
           <span key={i} style={{ flex: 1, background: k.hex }} />
         ))}
-        <Shirt
-          size={Math.round(grootte * 0.45)}
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
-          style={{ color: "rgba(255,255,255,0.85)", mixBlendMode: "difference" }}
-        />
+        <CategorieIcoon categorie={item?.categorie} grootte={Math.round(grootte * 0.62)} />
       </span>
     );
   };
