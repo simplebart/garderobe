@@ -500,6 +500,18 @@ export default function GarderobeApp() {
     setPlan((prev) => prev.map((d, i) => (i === dagIndex ? { ...d, gedragen: true } : d)));
   }
 
+  // Handmatig een enkel stuk op vies zetten (koffie gemorst) of juist terug
+  // op schoon (toch niet gedragen / tussendoor gewassen). Terug naar schoon
+  // reset ook de draagteller, alsof het net uit de was komt.
+  function wisselVies(id) {
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== id) return it;
+        return it.vies ? { ...it, vies: false, draagTeller: 0 } : { ...it, vies: true };
+      })
+    );
+  }
+
   function wasAlles() {
     setItems((prev) => prev.map((it) => ({ ...it, vies: false, draagTeller: 0 })));
   }
@@ -1604,15 +1616,18 @@ export default function GarderobeApp() {
                               {seizoenTekst(it.seizoenen)} · {tempTekst(it.tempBanden)}
                             </span>
                           </span>
-                          <span
-                            className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0"
+                          <button
+                            onClick={() => wisselVies(it.id)}
+                            className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0 cursor-pointer"
                             style={{
                               background: it.vies ? "#F9E9E4" : "#E8F0EA",
                               color: it.vies ? KLEUREN.bordeaux : KLEUREN.groen,
+                              border: `1px solid ${it.vies ? "#EBCDC4" : "#CFE0D3"}`,
                             }}
+                            title={it.vies ? "Klik om terug op schoon te zetten" : "Klik om op vies te zetten"}
                           >
                             {it.vies ? "vies" : `schoon ${it.draagTeller || 0}/${it.maxDraag}`}
-                          </span>
+                          </button>
                           <button
                             onClick={() => setBewerkSeizoenId(bewerkSeizoenId === it.id ? null : it.id)}
                             title="Seizoenen aanpassen"
