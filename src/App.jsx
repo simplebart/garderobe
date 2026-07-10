@@ -279,13 +279,13 @@ const kleurenBotsen = (a, b) => {
 };
 
 // ---------- Outfitgenerator ----------
-function genereerDag(items, dag, stijl, vermijden = new Set()) {
+function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = new Map()) {
   const dagBand = bandVanTemp(dag.temp);
   const regent = dag.regenkans >= 50;
   const vandaag = new Set();
 
   const kies = (categorie, extraFilter = () => true) => {
-    const kandidaten = items.filter(
+    const basis = items.filter(
       (it) =>
         it.categorie === categorie &&
         !it.vies &&
@@ -293,18 +293,26 @@ function genereerDag(items, dag, stijl, vermijden = new Set()) {
         !vandaag.has(it.id) &&
         extraFilter(it)
     );
+    // "vermijden" (recent gedragen stukken) is nu een HARDE regel: alleen als
+    // er anders niks schoons overblijft, mag een recent stuk terugkomen. Zo
+    // wordt de niet-op-rij-regel niet meer stilletjes overtreden.
+    const nietRecent = basis.filter((it) => !vermijden.has(it.id));
+    const kern = nietRecent.length ? nietRecent : basis;
     const lagen = [
-      kandidaten.filter((it) => it.stijl === stijl && !vermijden.has(it.id)),
-      kandidaten.filter((it) => it.stijl === stijl),
-      kandidaten.filter((it) => !vermijden.has(it.id)),
-      kandidaten,
+      kern.filter((it) => it.stijl === stijl),
+      kern,
     ];
     for (const laag of lagen) {
       const pool = regent && categorie === "schoenen" ? laag.filter((it) => it.regenOk !== false) : laag;
       const bruikbaar = pool.length ? pool : laag;
       if (bruikbaar.length) {
-        const keuze = bruikbaar[Math.floor(Math.random() * bruikbaar.length)];
+        // Kies het stuk dat het minst vaak in dit plan is voorgekomen, zodat
+        // de garderobe gelijkmatig rouleert i.p.v. steeds dezelfde favoriet.
+        const minst = Math.min(...bruikbaar.map((it) => gebruikTeller.get(it.id) || 0));
+        const zeldzaam = bruikbaar.filter((it) => (gebruikTeller.get(it.id) || 0) === minst);
+        const keuze = zeldzaam[Math.floor(Math.random() * zeldzaam.length)];
         vandaag.add(keuze.id);
+        gebruikTeller.set(keuze.id, (gebruikTeller.get(keuze.id) || 0) + 1);
         return keuze;
       }
     }
@@ -367,11 +375,17 @@ function genereerDag(items, dag, stijl, vermijden = new Set()) {
   return { outfit, gebruikt: vandaag };
 }
 
+const TERUGKIJK_DAGEN = 2; // een stuk komt niet binnen 2 dagen terug
+
 function genereerPlan(items, weerDagen, stijl) {
-  let vorige = new Set();
+  const historie = []; // per dag de Set met gebruikte item-ids
+  const gebruikTeller = new Map(); // hoe vaak elk stuk in dit plan zit
   return weerDagen.map((dag) => {
-    const { outfit, gebruikt } = genereerDag(items, dag, stijl, vorige);
-    vorige = gebruikt;
+    // Alles wat de afgelopen TERUGKIJK_DAGEN dagen gedragen is, wordt vermeden.
+    const vermijden = new Set();
+    historie.slice(-TERUGKIJK_DAGEN).forEach((set) => set.forEach((id) => vermijden.add(id)));
+    const { outfit, gebruikt } = genereerDag(items, dag, stijl, vermijden, gebruikTeller);
+    historie.push(gebruikt);
     return { ...dag, outfit, gedragen: false };
   });
 }
@@ -529,7 +543,7 @@ export default function GarderobeApp() {
     const actueel = weer.find((w) => w.datum === plan[i].datum);
     if (!actueel) return;
     const vermijden = new Set();
-    [plan[i - 1], plan[i + 1]].forEach((buurdag) => {
+    [plan[i - 2], plan[i - 1], plan[i + 1], plan[i + 2]].forEach((buurdag) => {
       if (!buurdag) return;
       Object.values(buurdag.outfit).flat().filter(Boolean).forEach((it) => vermijden.add(it.id));
     });
