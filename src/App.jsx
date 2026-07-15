@@ -284,18 +284,35 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
   const regent = dag.regenkans >= 50;
   const vandaag = new Set();
 
-  const kies = (categorie, extraFilter = () => true) => {
-    const basis = items.filter(
+  const dagBandIndex = TEMP_BANDEN.findIndex((b) => b.id === dagBand);
+  // Hoe ver zit de dichtstbijzijnde band van een item af van de dag? 0 = past.
+  const bandAfstand = (it) => {
+    const banden = it.tempBanden || ALLE_BANDEN;
+    return Math.min(
+      ...banden.map((id) => Math.abs(TEMP_BANDEN.findIndex((b) => b.id === id) - dagBandIndex))
+    );
+  };
+
+  const kies = (categorie, extraFilter = () => true, verplicht = false) => {
+    const beschikbaar = items.filter(
       (it) =>
         it.categorie === categorie &&
         !it.vies &&
-        (it.tempBanden || ALLE_BANDEN).includes(dagBand) &&
         !vandaag.has(it.id) &&
         extraFilter(it)
     );
+    // Temperatuur: normaal moet het item de dagband dekken. Bij een verplicht
+    // onderdeel (broek/basislaag/schoenen) mag dat losgelaten worden als er
+    // anders niets is — dan pakken we de items die qua temperatuur het dichtst
+    // in de buurt komen, zodat er altijd iets aan kan.
+    const inBand = beschikbaar.filter((it) => (it.tempBanden || ALLE_BANDEN).includes(dagBand));
+    let basis = inBand;
+    if (!inBand.length && verplicht && beschikbaar.length) {
+      const dichtst = Math.min(...beschikbaar.map(bandAfstand));
+      basis = beschikbaar.filter((it) => bandAfstand(it) === dichtst);
+    }
     // "vermijden" (recent gedragen stukken) is nu een HARDE regel: alleen als
-    // er anders niks schoons overblijft, mag een recent stuk terugkomen. Zo
-    // wordt de niet-op-rij-regel niet meer stilletjes overtreden.
+    // er anders niks schoons overblijft, mag een recent stuk terugkomen.
     const nietRecent = basis.filter((it) => !vermijden.has(it.id));
     const kern = nietRecent.length ? nietRecent : basis;
     const lagen = [
@@ -319,13 +336,13 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
     return null;
   };
 
-  const kiesMetVoorkeur = (categorie, hard, voorkeur) =>
-    kies(categorie, (it) => hard(it) && voorkeur(it)) || kies(categorie, hard);
+  const kiesMetVoorkeur = (categorie, hard, voorkeur, verplicht = false) =>
+    kies(categorie, (it) => hard(it) && voorkeur(it), verplicht) || kies(categorie, hard, verplicht);
 
-  let basislaag = kies("top", (it) => (it.laag || "basis") === "basis");
+  let basislaag = kies("top", (it) => (it.laag || "basis") === "basis", true);
   let alleenOverlaag = false;
   if (!basislaag) {
-    basislaag = kies("top", (it) => it.laag === "over");
+    basislaag = kies("top", (it) => it.laag === "over", true);
     alleenOverlaag = true;
   }
 
@@ -345,7 +362,8 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
   const broek = kiesMetVoorkeur(
     "broek",
     (it) => pasvormOk(bovenRuim, it),
-    (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) && !(it.patroon && patronenBoven >= 1)
+    (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) && !(it.patroon && patronenBoven >= 1),
+    true
   );
 
   const jas =
@@ -367,7 +385,7 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
     basislaag,
     overlaag,
     broek,
-    schoenen: kies("schoenen"),
+    schoenen: kies("schoenen", () => true, true),
     jas,
     accessoires,
   };
