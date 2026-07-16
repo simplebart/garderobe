@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Settings2, X, Download, Upload, Pencil } from "lucide-react";
+import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Settings2, X, Download, Upload, Pencil, Plane, MapPin, AlertTriangle } from "lucide-react";
 
 // ---------- Constanten ----------
 const KLEUREN = {
@@ -395,6 +395,63 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
 
 const TERUGKIJK_DAGEN = 2; // een stuk komt niet binnen 2 dagen terug
 
+// Vakantieplanner: plant N dagen zonder wasbeurt onderweg. Elk gekozen stuk
+// wordt voor de rest van de reis "opgebruikt" tot zijn draaglimiet bereikt is;
+// daarna doet het niet meer mee. Een stuk dat nu al vies is mag wél gekozen
+// worden, maar krijgt het label "wassen voor vertrek". Lukt een categorie
+// helemaal niet meer (alles op), dan meldt de planner dat als tekort.
+function genereerVakantie(items, weerDagen, stijl) {
+  // Resterende draagbeurten per stuk voor deze reis. Een vies stuk telt als
+  // 0 gedragen (na wassen weer helemaal fris), maar houdt zijn "moetWassen".
+  const rest = new Map();
+  items.forEach((it) => rest.set(it.id, it.maxDraag || 1));
+  const moetWassen = new Set(items.filter((it) => it.vies).map((it) => it.id));
+
+  const historie = [];
+  const gebruikTeller = new Map();
+  const tekorten = new Set();
+
+  const dagen = weerDagen.map((dag) => {
+    const vermijden = new Set();
+    historie.slice(-TERUGKIJK_DAGEN).forEach((set) => set.forEach((id) => vermijden.add(id)));
+    // Stukken die hun draaglimiet voor deze reis bereikt hebben, doen niet meer mee.
+    const beschikbaar = items.filter((it) => (rest.get(it.id) || 0) > 0);
+    // We laten de bestaande daggenerator het werk doen, maar met vies-status
+    // tijdelijk uitgeschakeld (op reis mag vies mee) en de opgebruikte stukken
+    // eruit gefilterd.
+    const reisItems = beschikbaar.map((it) => ({ ...it, vies: false }));
+    const { outfit, gebruikt } = genereerDag(reisItems, dag, stijl, vermijden, gebruikTeller);
+    // Draagbeurten afboeken en tekorten registreren.
+    const platteOutfit = Object.entries(outfit);
+    platteOutfit.forEach(([sleutel, waarde]) => {
+      const stukken = Array.isArray(waarde) ? waarde : waarde ? [waarde] : [];
+      if (!stukken.length && ["basislaag", "broek", "schoenen"].includes(sleutel)) tekorten.add(sleutel);
+      stukken.forEach((it) => rest.set(it.id, (rest.get(it.id) || 1) - 1));
+    });
+    historie.push(gebruikt);
+    return { ...dag, outfit, gedragen: false };
+  });
+
+  return { dagen, moetWassen: [...moetWassen], tekorten: [...tekorten] };
+}
+
+// Bouwt uit een reisplan een paklijst: elk uniek stuk één keer, met hoe vaak
+// het gedragen wordt en of het nog gewassen moet worden voor vertrek.
+function paklijstVanPlan(dagen, moetWassen, items) {
+  const telling = new Map();
+  dagen.forEach((dag) => {
+    Object.values(dag.outfit).flat().filter(Boolean).forEach((it) => {
+      telling.set(it.id, (telling.get(it.id) || 0) + 1);
+    });
+  });
+  return [...telling.entries()]
+    .map(([id, keer]) => {
+      const item = items.find((it) => it.id === id);
+      return item ? { item, keer, moetWassen: moetWassen.includes(id) } : null;
+    })
+    .filter(Boolean);
+}
+
 function genereerPlan(items, weerDagen, stijl) {
   const historie = []; // per dag de Set met gebruikte item-ids
   const gebruikTeller = new Map(); // hoe vaak elk stuk in dit plan zit
@@ -420,6 +477,11 @@ export default function GarderobeApp() {
   const [weerLaadt, setWeerLaadt] = useState(false);
   const [plan, setPlan] = useState([]);
   const [tab, setTab] = useState("planner");
+  // Vakantie-modus
+  const [reis, setReis] = useState({ bestemming: "", dagen: 7 });
+  const [reisLaadt, setReisLaadt] = useState(false);
+  const [reisFout, setReisFout] = useState("");
+  const [reisResultaat, setReisResultaat] = useState(null); // { plaatsnaam, dagen, paklijst, tekorten }
   const [geladen, setGeladen] = useState(false);
   const [beheerOpen, setBeheerOpen] = useState(false);
   const [nieuweKleur, setNieuweKleur] = useState({ label: "", hex: "#888888" });
@@ -505,6 +567,56 @@ export default function GarderobeApp() {
     }
     setWeerTijd(new Date());
     setWeerLaadt(false);
+  }
+
+  // Zoekt de coordinaten van de bestemming en haalt daar de weersverwachting
+  // op. Open-Meteo geeft hooguit 16 dagen vooruit; verder terugvallen op het
+  // seizoensgemiddelde van de laatste beschikbare dag.
+  async function maakVakantieplan() {
+    const plaats = reis.bestemming.trim();
+    const aantal = Math.max(1, Math.min(16, Number(reis.dagen) || 7));
+    if (!plaats) { setReisFout("Vul eerst een bestemming in."); return; }
+    setReisLaadt(true);
+    setReisFout("");
+    setReisResultaat(null);
+    try {
+      const geo = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(plaats)}&count=1&language=nl`
+      );
+      const gj = await geo.json();
+      if (!gj.results?.length) throw new Error(`Bestemming "${plaats}" niet gevonden. Probeer een stadsnaam.`);
+      const { latitude, longitude, name, country } = gj.results[0];
+      const w = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&daily=temperature_2m_max,precipitation_probability_max&forecast_days=${Math.min(16, aantal)}&timezone=auto`
+      );
+      const wj = await w.json();
+      let weerDagen = wj.daily.time.map((t, i) => ({
+        datum: t,
+        temp: Math.round(wj.daily.temperature_2m_max[i]),
+        regenkans: wj.daily.precipitation_probability_max[i] ?? 0,
+      }));
+      // Reis langer dan de voorspelling? Vul aan met de laatste bekende dag.
+      while (weerDagen.length < aantal) {
+        const laatste = weerDagen[weerDagen.length - 1];
+        const d = new Date(laatste.datum + "T12:00:00");
+        d.setDate(d.getDate() + 1);
+        weerDagen.push({ ...laatste, datum: d.toISOString().slice(0, 10), geschat: true });
+      }
+      const { dagen, moetWassen, tekorten } = genereerVakantie(items, weerDagen, stijl);
+      const paklijst = paklijstVanPlan(dagen, moetWassen, items);
+      setReisResultaat({
+        plaatsnaam: country ? `${name}, ${country}` : name,
+        dagen,
+        paklijst,
+        tekorten,
+        voorspeldTot: Math.min(16, aantal),
+        totaal: aantal,
+      });
+    } catch (e) {
+      console.error("Vakantieplan mislukt:", e);
+      setReisFout(e.message || "Er ging iets mis bij het ophalen van het weer.");
+    }
+    setReisLaadt(false);
   }
 
   function maakPlan() {
@@ -1092,9 +1204,12 @@ export default function GarderobeApp() {
           </button>
         </header>
 
-        <nav className="flex gap-2 mb-6">
+        <nav className="flex gap-2 mb-6 flex-wrap">
           <button onClick={() => setTab("planner")} className="px-4 py-2 rounded-full text-sm font-medium" style={knopStijl(tab === "planner")}>
             Weekplanner
+          </button>
+          <button onClick={() => setTab("vakantie")} className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium" style={knopStijl(tab === "vakantie")}>
+            <Plane size={15} /> Vakantie
           </button>
           <button onClick={() => setTab("kast")} className="px-4 py-2 rounded-full text-sm font-medium" style={knopStijl(tab === "kast")}>
             Kledingkast ({items.length})
@@ -1293,6 +1408,172 @@ export default function GarderobeApp() {
                 );
               })}
             </div>
+          </section>
+        )}
+
+        {/* ---------- VAKANTIE ---------- */}
+        {tab === "vakantie" && (
+          <section>
+            <div className="rounded-xl p-4 mb-5" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+              <h2 className="font-medium mb-1 flex items-center gap-2" style={{ fontFamily: "Georgia, serif" }}>
+                <Plane size={18} /> Vakantieplanner
+              </h2>
+              <p className="text-xs mb-3" style={{ color: KLEUREN.grijs }}>
+                Vul je bestemming en het aantal dagen in. De app haalt het weer daar op, maakt een
+                dagplanning en een paklijst — zonder te rekenen op een wasbeurt onderweg.
+              </p>
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="flex flex-col gap-1 flex-1 min-w-48">
+                  <span className="text-xs uppercase tracking-wide" style={{ color: KLEUREN.grijs }}>Bestemming</span>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ border: `1.5px solid ${KLEUREN.lijn}` }}>
+                    <MapPin size={15} style={{ color: KLEUREN.grijs }} />
+                    <input
+                      value={reis.bestemming}
+                      onChange={(e) => setReis({ ...reis, bestemming: e.target.value })}
+                      onKeyDown={(e) => e.key === "Enter" && maakVakantieplan()}
+                      placeholder="Bijv. Barcelona"
+                      className="flex-1 min-w-0 text-sm outline-none bg-transparent"
+                    />
+                  </div>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs uppercase tracking-wide" style={{ color: KLEUREN.grijs }}>Dagen</span>
+                  <input
+                    type="number" min="1" max="16" value={reis.dagen}
+                    onChange={(e) => setReis({ ...reis, dagen: e.target.value })}
+                    className="w-20 px-3 py-2 rounded-lg text-sm"
+                    style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
+                  />
+                </label>
+                <button
+                  onClick={maakVakantieplan}
+                  disabled={reisLaadt || !items.length}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                  style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}
+                >
+                  {reisLaadt ? <RefreshCw size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                  {reisLaadt ? "Bezig…" : "Maak paklijst & planning"}
+                </button>
+              </div>
+              {!items.length && (
+                <p className="text-xs mt-3" style={{ color: KLEUREN.bordeaux }}>
+                  Je kast is nog leeg — voeg eerst kledingstukken toe.
+                </p>
+              )}
+              {reisFout && (
+                <p className="text-sm mt-3 rounded-lg px-3 py-2" style={{ background: "#F9E9E4", color: KLEUREN.bordeaux }}>
+                  {reisFout}
+                </p>
+              )}
+            </div>
+
+            {reisResultaat && (
+              <>
+                <p className="text-sm mb-4" style={{ color: KLEUREN.grijs }}>
+                  Weer en planning voor <strong style={{ color: KLEUREN.navy }}>{reisResultaat.plaatsnaam}</strong> · {reisResultaat.totaal} dagen.
+                  {reisResultaat.totaal > reisResultaat.voorspeldTot &&
+                    ` De laatste ${reisResultaat.totaal - reisResultaat.voorspeldTot} dag(en) zijn geschat op basis van de laatste voorspelde dag.`}
+                </p>
+
+                {/* Waarschuwingen over tekorten en te wassen kleding */}
+                {reisResultaat.tekorten.length > 0 && (
+                  <div className="flex items-start gap-2 rounded-lg px-3 py-2 mb-3 text-sm" style={{ background: "#F9E9E4", color: KLEUREN.bordeaux }}>
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                    <span>
+                      Je kast heeft te weinig schone stukken voor de hele reis in de categorie{reisResultaat.tekorten.length > 1 ? "ën" : ""}:{" "}
+                      {reisResultaat.tekorten.join(", ")}. Overweeg extra kleding of een wasbeurt onderweg.
+                    </span>
+                  </div>
+                )}
+                {reisResultaat.paklijst.some((p) => p.moetWassen) && (
+                  <div className="flex items-start gap-2 rounded-lg px-3 py-2 mb-4 text-sm" style={{ background: "#FBF3DC", color: KLEUREN.navy, border: `1px solid ${KLEUREN.goud}` }}>
+                    <WashingMachine size={16} className="mt-0.5 shrink-0" />
+                    <span>Sommige stukken op de paklijst zijn nu nog vies — was ze vóór vertrek (ze staan gemarkeerd).</span>
+                  </div>
+                )}
+
+                {/* Paklijst */}
+                <div className="rounded-xl p-4 mb-6" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                  <h3 className="font-medium mb-3 flex items-center gap-2" style={{ fontFamily: "Georgia, serif" }}>
+                    Paklijst ({reisResultaat.paklijst.length} stuks)
+                  </h3>
+                  {CATEGORIEEN.map((cat) => {
+                    const groep = reisResultaat.paklijst.filter((p) => p.item.categorie === cat.id);
+                    if (!groep.length) return null;
+                    return (
+                      <div key={cat.id} className="mb-3">
+                        <p className="uppercase text-xs tracking-widest mb-1.5" style={{ color: KLEUREN.bordeaux, letterSpacing: "0.15em" }}>{cat.label}</p>
+                        <ul className="space-y-1.5">
+                          {groep.map(({ item, keer, moetWassen: mw }) => (
+                            <li key={item.id} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: KLEUREN.ivoor, border: `1px solid ${KLEUREN.lijn}` }}>
+                              <ItemBeeld item={item} grootte={40} />
+                              <span className="flex-1 min-w-0">
+                                <span className="block text-sm truncate">{item.merk ? `${item.merk} — ` : ""}{item.naam}</span>
+                                <span className="block text-xs" style={{ color: KLEUREN.grijs }}>{kleurenTekst(item)} · {keer}x nodig</span>
+                              </span>
+                              {mw && (
+                                <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: "#FBF3DC", color: KLEUREN.bordeaux, border: `1px solid ${KLEUREN.goud}` }}>
+                                  <WashingMachine size={12} /> nog wassen
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Dagplanning */}
+                <h3 className="font-medium mb-3" style={{ fontFamily: "Georgia, serif" }}>Dagplanning</h3>
+                <div className="space-y-4">
+                  {reisResultaat.dagen.map((dag, i) => (
+                    <article key={i} className="rounded-xl overflow-hidden" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                      <div className="flex items-center justify-between px-4 py-2" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
+                        <span className="font-medium" style={{ fontFamily: "Georgia, serif" }}>
+                          Dag {i + 1} <span className="text-xs font-normal opacity-70">{formatteerDatum(dag.datum)}{dag.geschat ? " (geschat)" : ""}</span>
+                        </span>
+                        <span className="flex items-center gap-2 text-sm">
+                          <WeerIcoon regenkans={dag.regenkans} temp={dag.temp} /> {dag.temp}° · {dag.regenkans}% regen
+                        </span>
+                      </div>
+                      <div className="p-4">
+                        <ul className="space-y-2">
+                          {["basislaag", "overlaag", "broek", "schoenen", "jas"].map((sleutel) => {
+                            const it = dag.outfit[sleutel];
+                            const verplicht = ["basislaag", "broek", "schoenen"].includes(sleutel);
+                            if (!it && !verplicht) return null;
+                            const label = { basislaag: "Basislaag", overlaag: "Overlaag", broek: "Broek", schoenen: "Schoenen", jas: "Jas" }[sleutel];
+                            return (
+                              <li key={sleutel} className="flex items-center gap-3 text-sm">
+                                <span className="w-20 shrink-0 uppercase text-xs tracking-wide" style={{ color: KLEUREN.grijs }}>{label}</span>
+                                {it ? (
+                                  <span className="flex items-center gap-3 min-w-0">
+                                    <ItemBeeld item={it} grootte={40} />
+                                    <span className="min-w-0 block truncate">{it.merk ? `${it.merk} — ` : ""}{it.naam}</span>
+                                  </span>
+                                ) : (
+                                  <span style={{ color: KLEUREN.bordeaux }}>Geen stuk beschikbaar</span>
+                                )}
+                              </li>
+                            );
+                          })}
+                          {(dag.outfit.accessoires || []).map((it) => (
+                            <li key={it.id} className="flex items-center gap-3 text-sm">
+                              <span className="w-20 shrink-0 uppercase text-xs tracking-wide" style={{ color: KLEUREN.grijs }}>Accessoire</span>
+                              <span className="flex items-center gap-3 min-w-0">
+                                <ItemBeeld item={it} grootte={40} />
+                                <span className="min-w-0 block truncate">{it.merk ? `${it.merk} — ` : ""}{it.naam}</span>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
           </section>
         )}
 
