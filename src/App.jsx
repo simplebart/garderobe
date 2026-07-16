@@ -455,11 +455,20 @@ function paklijstVanPlan(dagen, moetWassen, items) {
 function genereerPlan(items, weerDagen, stijl) {
   const historie = []; // per dag de Set met gebruikte item-ids
   const gebruikTeller = new Map(); // hoe vaak elk stuk in dit plan zit
+  // Resterende draagbeurten: begint bij (maxDraag - al gedragen). Zo plant de
+  // planner een chino die nog 1x mag niet drie dagen in — hij wordt "vies"
+  // zodra zijn limiet binnen dit plan bereikt is, precies als in het echt.
+  const rest = new Map();
+  items.forEach((it) => rest.set(it.id, Math.max(0, (it.maxDraag || 1) - (it.draagTeller || 0))));
+
   return weerDagen.map((dag) => {
-    // Alles wat de afgelopen TERUGKIJK_DAGEN dagen gedragen is, wordt vermeden.
     const vermijden = new Set();
     historie.slice(-TERUGKIJK_DAGEN).forEach((set) => set.forEach((id) => vermijden.add(id)));
-    const { outfit, gebruikt } = genereerDag(items, dag, stijl, vermijden, gebruikTeller);
+    // Stukken zonder resterende beurten doen niet mee (behalve dat ze al via
+    // it.vies zouden afvallen — dit vangt de gevallen die binnen het plan opraken).
+    const beschikbaar = items.filter((it) => (rest.get(it.id) || 0) > 0 || it.maxDraag >= 900);
+    const { outfit, gebruikt } = genereerDag(beschikbaar, dag, stijl, vermijden, gebruikTeller);
+    gebruikt.forEach((id) => rest.set(id, (rest.get(id) || 1) - 1));
     historie.push(gebruikt);
     return { ...dag, outfit, gedragen: false };
   });
@@ -498,6 +507,7 @@ export default function GarderobeApp() {
   const [laatsteSync, setLaatsteSync] = useState(null);
   const negeerPush = useRef(true); // eerste render en net-opgehaalde data niet terugpushen
   const SYNC_SLEUTEL = "garderobe-sync-v1";
+  const GEWIJZIGD_SLEUTEL = "garderobe-gewijzigd-v1";
 
   // Laden uit localStorage (met migratie van oudere items)
   useEffect(() => {
@@ -539,6 +549,7 @@ export default function GarderobeApp() {
     if (eersteOpslag.current) { eersteOpslag.current = false; return; }
     try {
       localStorage.setItem(OPSLAG_SLEUTEL, JSON.stringify({ items, stijl, plan, kleuren, stijlen }));
+      localStorage.setItem(GEWIJZIGD_SLEUTEL, String(Date.now()));
     } catch (e) {
       console.error("Opslaan mislukt", e);
       alert("Opslaan mislukt — de browseropslag lijkt vol te zitten.");
@@ -711,6 +722,7 @@ export default function GarderobeApp() {
 
   // ---- Seizoenen: filter en handmatig bijstellen ----
   const [seizoenFilter, setSeizoenFilter] = useState("alle");
+  const [zoekterm, setZoekterm] = useState("");
   const [bewerkSeizoenId, setBewerkSeizoenId] = useState(null);
 
   function wisselSeizoen(itemId, seizoen) {
@@ -725,6 +737,10 @@ export default function GarderobeApp() {
         return nieuwLijst.length ? { ...it, seizoenen: nieuwLijst } : it;
       })
     );
+  }
+
+  function wijzigTekst(itemId, veld, waarde) {
+    setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, [veld]: waarde } : it)));
   }
 
   function wijzigCategorie(itemId, categorie) {
@@ -842,8 +858,15 @@ export default function GarderobeApp() {
       const j = await res.json();
       if (j.fout) throw new Error(j.fout);
       if (j.data) {
-        negeerPush.current = true; // net opgehaald: niet meteen terugpushen
-        pasDataToe(j.data);
+        const remoteTijd = j.data.gewijzigd || 0;
+        const lokaleTijd = Number(localStorage.getItem(GEWIJZIGD_SLEUTEL) || 0);
+        // Alleen overnemen als de cloud-versie nieuwer is (of we niets lokaals
+        // hebben). Anders houden we onze eigen, recentere wijzigingen.
+        if (remoteTijd >= lokaleTijd) {
+          negeerPush.current = true; // net opgehaald: niet meteen terugpushen
+          pasDataToe(j.data);
+          localStorage.setItem(GEWIJZIGD_SLEUTEL, String(remoteTijd));
+        }
       }
       setSyncStatus("ok");
       setLaatsteSync(new Date());
@@ -866,7 +889,7 @@ export default function GarderobeApp() {
       const res = await fetch(cfg.url, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ geheim: cfg.geheim, data: { items, stijl, plan, kleuren, stijlen } }),
+        body: JSON.stringify({ geheim: cfg.geheim, data: { items, stijl, plan, kleuren, stijlen, gewijzigd: Date.now() } }),
       });
       const j = await res.json();
       if (j.fout) throw new Error(j.fout);
@@ -1864,6 +1887,29 @@ export default function GarderobeApp() {
               </div>
             )}
 
+            {/* Zoeken op naam, merk of kleur — handig bij een volle kast. */}
+            {items.length > 0 && (
+              <div className="relative mb-3">
+                <input
+                  value={zoekterm}
+                  onChange={(e) => setZoekterm(e.target.value)}
+                  placeholder="Zoek op naam, merk of kleur…"
+                  className="w-full px-3 py-2 rounded-lg text-sm"
+                  style={{ border: `1.5px solid ${KLEUREN.lijn}`, background: KLEUREN.wit }}
+                />
+                {zoekterm && (
+                  <button
+                    onClick={() => setZoekterm("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2"
+                    style={{ color: KLEUREN.grijs }}
+                    title="Wissen"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Seizoensfilter: klik een seizoen om alleen de passende stukken
                 te zien — handig bij het wisselen/opruimen van de kast. */}
             {items.length > 0 && (
@@ -1900,10 +1946,15 @@ export default function GarderobeApp() {
               </div>
             ) : (
               CATEGORIEEN.map((cat) => {
+                const zt = zoekterm.trim().toLowerCase();
                 const groep = items.filter(
                   (it) =>
                     it.categorie === cat.id &&
-                    (seizoenFilter === "alle" || it.seizoenen?.includes(seizoenFilter))
+                    (seizoenFilter === "alle" || it.seizoenen?.includes(seizoenFilter)) &&
+                    (!zt ||
+                      (it.naam || "").toLowerCase().includes(zt) ||
+                      (it.merk || "").toLowerCase().includes(zt) ||
+                      itemKleuren(it).some((k) => kleurNaam(k).toLowerCase().includes(zt)))
                 );
                 if (!groep.length) return null;
                 return (
@@ -1955,6 +2006,27 @@ export default function GarderobeApp() {
                           </div>
                           {bewerkSeizoenId === it.id && (
                             <div className="mt-2 pt-2 space-y-2" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <label className="flex items-center gap-1.5 flex-1 min-w-40">
+                                  <span className="text-xs shrink-0" style={{ color: KLEUREN.grijs }}>Naam:</span>
+                                  <input
+                                    value={it.naam}
+                                    onChange={(e) => wijzigTekst(it.id, "naam", e.target.value)}
+                                    className="flex-1 min-w-0 px-2 py-1 rounded-lg text-sm"
+                                    style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
+                                  />
+                                </label>
+                                <label className="flex items-center gap-1.5 flex-1 min-w-40">
+                                  <span className="text-xs shrink-0" style={{ color: KLEUREN.grijs }}>Merk:</span>
+                                  <input
+                                    value={it.merk || ""}
+                                    onChange={(e) => wijzigTekst(it.id, "merk", e.target.value)}
+                                    placeholder="(optioneel)"
+                                    className="flex-1 min-w-0 px-2 py-1 rounded-lg text-sm"
+                                    style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
+                                  />
+                                </label>
+                              </div>
                               <div className="flex flex-wrap items-center gap-1.5">
                                 <span className="text-xs mr-1" style={{ color: KLEUREN.grijs }}>Seizoen:</span>
                                 {SEIZOENEN.map((s) => {
