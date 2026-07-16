@@ -522,6 +522,9 @@ export default function GarderobeApp() {
         if (data.kleuren?.length) setKleuren(data.kleuren);
         if (data.stijlen?.length) setStijlen(data.stijlen);
         if (planNogGeldig(data.plan)) setPlan(data.plan);
+        // Vakantieplan blijft bewaard tot je het wist of een nieuw maakt.
+        if (data.reis) setReis(data.reis);
+        if (data.reisResultaat) setReisResultaat(data.reisResultaat);
       }
     } catch (e) {
       /* nog niets opgeslagen of onleesbaar */
@@ -548,13 +551,13 @@ export default function GarderobeApp() {
     if (!geladen) return;
     if (eersteOpslag.current) { eersteOpslag.current = false; return; }
     try {
-      localStorage.setItem(OPSLAG_SLEUTEL, JSON.stringify({ items, stijl, plan, kleuren, stijlen }));
+      localStorage.setItem(OPSLAG_SLEUTEL, JSON.stringify({ items, stijl, plan, kleuren, stijlen, reis, reisResultaat }));
       localStorage.setItem(GEWIJZIGD_SLEUTEL, String(Date.now()));
     } catch (e) {
       console.error("Opslaan mislukt", e);
       alert("Opslaan mislukt — de browseropslag lijkt vol te zitten.");
     }
-  }, [items, stijl, plan, kleuren, stijlen, geladen]);
+  }, [items, stijl, plan, kleuren, stijlen, reis, reisResultaat, geladen]);
 
   async function haalWeerOp() {
     setWeerLaadt(true);
@@ -845,6 +848,8 @@ export default function GarderobeApp() {
     if (data.kleuren?.length) setKleuren(data.kleuren);
     if (data.stijlen?.length) setStijlen(data.stijlen);
     setPlan(planNogGeldig(data.plan) ? data.plan : []);
+    if (data.reis) setReis(data.reis);
+    setReisResultaat(data.reisResultaat || null);
     return true;
   }
 
@@ -889,7 +894,7 @@ export default function GarderobeApp() {
       const res = await fetch(cfg.url, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ geheim: cfg.geheim, data: { items, stijl, plan, kleuren, stijlen, gewijzigd: Date.now() } }),
+        body: JSON.stringify({ geheim: cfg.geheim, data: { items, stijl, plan, kleuren, stijlen, reis, reisResultaat, gewijzigd: Date.now() } }),
       });
       const j = await res.json();
       if (j.fout) throw new Error(j.fout);
@@ -1492,11 +1497,21 @@ export default function GarderobeApp() {
 
             {reisResultaat && (
               <>
-                <p className="text-sm mb-4" style={{ color: KLEUREN.grijs }}>
-                  Weer en planning voor <strong style={{ color: KLEUREN.navy }}>{reisResultaat.plaatsnaam}</strong> · {reisResultaat.totaal} dagen.
-                  {reisResultaat.totaal > reisResultaat.voorspeldTot &&
-                    ` De laatste ${reisResultaat.totaal - reisResultaat.voorspeldTot} dag(en) zijn geschat op basis van de laatste voorspelde dag.`}
-                </p>
+                <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+                  <p className="text-sm" style={{ color: KLEUREN.grijs }}>
+                    Weer en planning voor <strong style={{ color: KLEUREN.navy }}>{reisResultaat.plaatsnaam}</strong> · {reisResultaat.totaal} dagen.
+                    {reisResultaat.totaal > reisResultaat.voorspeldTot &&
+                      ` De laatste ${reisResultaat.totaal - reisResultaat.voorspeldTot} dag(en) zijn geschat op basis van de laatste voorspelde dag.`}
+                  </p>
+                  <button
+                    onClick={() => { setReisResultaat(null); setReis({ bestemming: "", dagen: 7 }); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm shrink-0"
+                    style={{ border: `1.5px solid ${KLEUREN.lijn}`, color: KLEUREN.grijs }}
+                    title="Dit reisplan wissen"
+                  >
+                    <X size={14} /> Wis reisplan
+                  </button>
+                </div>
 
                 {/* Waarschuwingen over tekorten en te wassen kleding */}
                 {reisResultaat.tekorten.length > 0 && (
