@@ -1042,6 +1042,38 @@ export default function GarderobeApp() {
     );
   }
 
+  // Vervangt alleen de outfit van dag i in het weekplan, met hetzelfde weer.
+  // Buurdagen worden vermeden zodat de niet-op-rij-regel blijft kloppen.
+  function vervangDag(i) {
+    const dag = plan[i];
+    if (!dag) return;
+    const vermijden = new Set();
+    [plan[i - 2], plan[i - 1], plan[i + 1], plan[i + 2]].forEach((buur) => {
+      if (!buur) return;
+      Object.values(buur.outfit).flat().filter(Boolean).forEach((it) => vermijden.add(it.id));
+    });
+    const { outfit } = genereerDag(items, dag, stijl, vermijden, new Map(), voorkeuren);
+    setPlan((prev) => prev.map((d, j) => (j === i ? { ...d, outfit } : d)));
+  }
+
+  // Idem voor de vakantieplanner: alleen deze reisdag opnieuw samenstellen.
+  function vervangReisDag(i) {
+    if (!reisResultaat) return;
+    const dag = reisResultaat.dagen[i];
+    if (!dag) return;
+    const vermijden = new Set();
+    [reisResultaat.dagen[i - 2], reisResultaat.dagen[i - 1], reisResultaat.dagen[i + 1], reisResultaat.dagen[i + 2]].forEach((buur) => {
+      if (!buur) return;
+      Object.values(buur.outfit).flat().filter(Boolean).forEach((it) => vermijden.add(it.id));
+    });
+    const { outfit } = genereerDag(items, dag, stijl, vermijden, new Map(), voorkeuren);
+    const nieuweDagen = reisResultaat.dagen.map((d, j) => (j === i ? { ...d, outfit } : d));
+    // Paklijst opnieuw afleiden zodat die klopt met de nieuwe outfits.
+    const moetWassen = items.filter((it) => it.vies).map((it) => it.id);
+    const paklijst = paklijstVanPlan(nieuweDagen, moetWassen, items);
+    setReisResultaat({ ...reisResultaat, dagen: nieuweDagen, paklijst });
+  }
+
   function voegToe() {
     if (!nieuw.naam.trim()) return;
     const kaal = {
@@ -1825,14 +1857,26 @@ export default function GarderobeApp() {
                       ))}
                     </ul>
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <button
-                        onClick={() => registreerGedragen(i)}
-                        disabled={dag.gedragen}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-60"
-                        style={{ background: dag.gedragen ? KLEUREN.groen : "transparent", color: dag.gedragen ? KLEUREN.ivoor : KLEUREN.groen, border: `1.5px solid ${KLEUREN.groen}` }}
-                      >
-                        <Check size={15} /> {dag.gedragen ? "Gedragen geregistreerd" : "Ik draag dit"}
-                      </button>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          onClick={() => registreerGedragen(i)}
+                          disabled={dag.gedragen}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-60"
+                          style={{ background: dag.gedragen ? KLEUREN.groen : "transparent", color: dag.gedragen ? KLEUREN.ivoor : KLEUREN.groen, border: `1.5px solid ${KLEUREN.groen}` }}
+                        >
+                          <Check size={15} /> {dag.gedragen ? "Gedragen geregistreerd" : "Ik draag dit"}
+                        </button>
+                        {!dag.gedragen && (
+                          <button
+                            onClick={() => vervangDag(i)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm"
+                            style={{ border: `1.5px solid ${KLEUREN.lijn}`, color: KLEUREN.navy }}
+                            title="Stel een andere outfit voor deze dag voor"
+                          >
+                            <RefreshCw size={14} /> Andere outfit
+                          </button>
+                        )}
+                      </div>
                       <OutfitFeedback outfit={dag.outfit} />
                     </div>
                   </div>
@@ -2184,9 +2228,19 @@ export default function GarderobeApp() {
                             </li>
                           ))}
                         </ul>
-                        <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
-                          <span className="text-xs" style={{ color: KLEUREN.grijs }}>Bevalt deze combinatie?</span>
-                          <OutfitFeedback outfit={dag.outfit} />
+                        <div className="flex items-center justify-between gap-2 mt-3 pt-3 flex-wrap" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs" style={{ color: KLEUREN.grijs }}>Bevalt deze combinatie?</span>
+                            <OutfitFeedback outfit={dag.outfit} />
+                          </div>
+                          <button
+                            onClick={() => vervangReisDag(i)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm"
+                            style={{ border: `1.5px solid ${KLEUREN.lijn}`, color: KLEUREN.navy }}
+                            title="Stel een andere outfit voor deze dag voor"
+                          >
+                            <RefreshCw size={14} /> Andere outfit
+                          </button>
                         </div>
                       </div>
                     </article>
