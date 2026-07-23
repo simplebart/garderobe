@@ -579,29 +579,61 @@ function genereerGelegenheid(items, gelegenheid, voorkeuren = {}) {
   const ontbreekt = [];
   const passendeStijl = (it) => !gelegenheid.stijlen?.length || gelegenheid.stijlen.includes(it.stijl);
 
-  gelegenheid.vereist.forEach((eis) => {
+  // De outfit wordt nu stuk-voor-stuk opgebouwd MET de combinatie-regels van de
+  // weekplanner: elk volgend stuk wordt beoordeeld op hoe goed het past bij wat
+  // al gekozen is (kleur botst niet, pasvorm klopt, hooguit een patroon). Zo is
+  // het geheel afgestemd i.p.v. losse "op zich geschikte" stukken.
+  //
+  // We verwerken de eisen in een vaste, logische volgorde zodat de bovenlaag
+  // eerst vaststaat en de broek/schoenen zich daarnaar kunnen voegen.
+  const volgorde = ["basislaag", "overlaag", "broek", "schoenen", "jas", "accessoire"];
+  const eisen = [...gelegenheid.vereist].sort(
+    (a, b) => volgorde.indexOf(a.rol) - volgorde.indexOf(b.rol)
+  );
+
+  eisen.forEach((eis) => {
     const kandidaten = items.filter((it) => eis.filter(it) && !gebruikt.has(it.id));
     if (!kandidaten.length) {
       ontbreekt.push(eis);
       return;
     }
-    // Rangschik: schoon boven vies, juiste stijl boven andere stijl, en bij een
-    // begrafenis/gala de voorkeurskleuren eerst.
-    const gekozenIds = gekozen.map((g) => g.item.id);
+
+    // Wat is er al gekozen? Daar stemmen we dit stuk op af.
+    const reeds = gekozen.map((g) => g.item);
+    const reedsIds = reeds.map((it) => it.id);
+    const bovenRuim = reeds.some((it) => (it.pasvorm || "regular") === "ruim");
+    const patronenTot = reeds.filter((it) => it.patroon).length;
+
     const score = (it) => {
       let s = 0;
+      // Basiskwaliteit voor de gelegenheid.
       if (!it.vies) s += 100;
       if (passendeStijl(it)) s += 40;
-      if (gelegenheid.voorkeurKleuren?.length && itemKleurenIds(it).some((k) => gelegenheid.voorkeurKleuren.includes(k))) s += 20;
-      // Zachte duw van je feedback op eerdere combinaties (tiebreaker).
-      s += voorkeurScore(it.id, gekozenIds, voorkeuren);
+      if (gelegenheid.voorkeurKleuren?.length && itemKleurenIds(it).some((k) => gelegenheid.voorkeurKleuren.includes(k))) s += 15;
+
+      // Combinatie-regels t.o.v. de al gekozen stukken (dit is de nieuwe kern):
+      // botsende kleuren en te veel patronen worden zwaar afgestraft, zodat het
+      // geheel klopt. Pasvorm-clash (ruim boven + slim broek) idem.
+      const botst = reeds.some((ander) => kleurenBotsen(it.kleuren, ander.kleuren));
+      if (botst) s -= 60;
+      if (it.patroon && patronenTot >= 1) s -= 40;
+      if (eis.rol === "broek" && !pasvormOk(bovenRuim, it)) s -= 50;
+
+      // Zachte duw van je like/dislike-feedback op eerdere combinaties.
+      s += voorkeurScore(it.id, reedsIds, voorkeuren);
       return s;
     };
+
     const beste = [...kandidaten].sort((a, b) => score(b) - score(a))[0];
     gebruikt.add(beste.id);
     gekozen.push({ rol: eis.rol, omschrijving: eis.omschrijving, item: beste, moetWassen: !!beste.vies });
   });
 
+  // Terug in de oorspronkelijke eis-volgorde tonen (basislaag, broek, ...).
+  gekozen.sort((a, b) =>
+    gelegenheid.vereist.findIndex((e) => e.rol === a.rol) -
+    gelegenheid.vereist.findIndex((e) => e.rol === b.rol)
+  );
   return { gekozen, ontbreekt };
 }
 
