@@ -483,6 +483,47 @@ function paklijstVanPlan(dagen, moetWassen, items) {
     .filter(Boolean);
 }
 
+// Kleine helper: kleur-ids van een item (met terugval op enkelvoudige kleur).
+function itemKleurenIds(item) {
+  return item?.kleuren?.length ? item.kleuren : [item?.kleur].filter(Boolean);
+}
+
+// ---------- Netheid-herkenning voor gelegenheden ----------
+// Bepaalt hoe "net" een stuk is op basis van naam, stijl en pasvorm. Zo kan
+// een formele gelegenheid casual stukken (sneakers, baggy jeans, hoodie) hard
+// weren, en houdt "restaurant" felle/sportieve dingen buiten de deur.
+const CASUAL_STIJLEN = ["Casual", "Sportief"];
+const NETTE_STIJLEN = ["Klassiek", "Smart casual"];
+
+// Trefwoorden die een stuk als uitgesproken casual/sportief markeren.
+const CASUAL_WOORDEN = ["sneaker", "baggy", "hoodie", "sweat", "jogger", "short", "korte broek", "t-shirt", "tshirt", "trui", "flap", "cargo", "jeans", "spijker", "vest", "gilet", "rugby", "polo"];
+// Trefwoorden voor uitgesproken nette stukken.
+const NET_WOORDEN = ["pantalon", "colbert", "blazer", "kostuum", "pak", "smoking", "overhemd", "oxford", "loafer", "veterschoen", "nette", "chelsea"];
+
+const bevatWoord = (naam, lijst) => {
+  const n = (naam || "").toLowerCase();
+  return lijst.some((w) => n.includes(w));
+};
+
+// Netheidsscore van een stuk: hoger = netter. Gebruikt om per gelegenheid een
+// drempel te leggen (bijv. gala eist echt nette stukken, restaurant iets minder).
+function netheid(it) {
+  let s = 0;
+  if (NETTE_STIJLEN.includes(it.stijl)) s += 2;
+  if (CASUAL_STIJLEN.includes(it.stijl)) s -= 2;
+  if (bevatWoord(it.naam, NET_WOORDEN)) s += 2;
+  if (bevatWoord(it.naam, CASUAL_WOORDEN)) s -= 2;
+  if ((it.pasvorm || "regular") === "ruim") s -= 1; // baggy = minder net
+  // Felle/opvallende kleuren zijn minder formeel.
+  const felle = ["geel", "groen", "lichtblauw", "bordeaux"];
+  if (itemKleurenIds(it).some((k) => felle.includes(k))) s -= 1;
+  return s;
+}
+
+// Filter-bouwer: item van de juiste categorie én netheid >= drempel.
+const netGenoeg = (categorie, drempel, extra = () => true) => (it) =>
+  it.categorie === categorie && extra(it) && netheid(it) >= drempel;
+
 // ---------- Gelegenheden ----------
 // Elke gelegenheid schrijft een dresscode voor: welke stijlen passen, en welke
 // onderdelen "vereist" zijn (met een korte omschrijving van wat je idealiter
@@ -493,9 +534,9 @@ const GELEGENHEDEN = [
     id: "restaurant", label: "Restaurant", emoji: "🍽️", categorie: "uitgaan",
     stijlen: ["Smart casual", "Klassiek", "Modern preppy"],
     vereist: [
-      { rol: "basislaag", omschrijving: "nette basislaag (overhemd of polo)", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
-      { rol: "broek", omschrijving: "nette broek (chino of pantalon, geen short)", filter: (it) => it.categorie === "broek" },
-      { rol: "schoenen", omschrijving: "nette schoenen (geen sneakers)", filter: (it) => it.categorie === "schoenen" },
+      { rol: "basislaag", omschrijving: "net overhemd of nette polo (geen fel t-shirt)", filter: netGenoeg("top", 0, (it) => (it.laag || "basis") === "basis") },
+      { rol: "broek", omschrijving: "nette broek: chino of pantalon (geen jeans/short)", filter: netGenoeg("broek", 0) },
+      { rol: "schoenen", omschrijving: "nette schoenen (geen sneakers)", filter: netGenoeg("schoenen", 1) },
     ],
   },
   {
@@ -511,17 +552,17 @@ const GELEGENHEDEN = [
     id: "date", label: "Date", emoji: "💐", categorie: "uitgaan",
     stijlen: ["Smart casual", "Modern preppy", "Klassiek"],
     vereist: [
-      { rol: "basislaag", omschrijving: "verzorgd bovenstuk", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
-      { rol: "broek", omschrijving: "nette broek", filter: (it) => it.categorie === "broek" },
-      { rol: "schoenen", omschrijving: "verzorgde schoenen", filter: (it) => it.categorie === "schoenen" },
+      { rol: "basislaag", omschrijving: "verzorgd overhemd of nette polo", filter: netGenoeg("top", 0, (it) => (it.laag || "basis") === "basis") },
+      { rol: "broek", omschrijving: "nette broek (geen baggy/short)", filter: netGenoeg("broek", 0) },
+      { rol: "schoenen", omschrijving: "verzorgde schoenen (geen sportsneakers)", filter: netGenoeg("schoenen", 1) },
     ],
   },
   {
     id: "borrel", label: "Borrel / feestje", emoji: "🥂", categorie: "uitgaan",
     stijlen: ["Smart casual", "Modern preppy", "Casual"],
     vereist: [
-      { rol: "basislaag", omschrijving: "leuk bovenstuk", filter: (it) => it.categorie === "top" },
-      { rol: "broek", omschrijving: "broek naar keuze", filter: (it) => it.categorie === "broek" },
+      { rol: "basislaag", omschrijving: "leuk bovenstuk", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
+      { rol: "broek", omschrijving: "broek naar keuze (jeans mag)", filter: (it) => it.categorie === "broek" },
       { rol: "schoenen", omschrijving: "schoenen naar keuze", filter: (it) => it.categorie === "schoenen" },
     ],
   },
@@ -529,20 +570,20 @@ const GELEGENHEDEN = [
     id: "sollicitatie", label: "Sollicitatie", emoji: "💼", categorie: "formeel",
     stijlen: ["Klassiek", "Smart casual"],
     vereist: [
-      { rol: "basislaag", omschrijving: "net overhemd", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
-      { rol: "broek", omschrijving: "nette pantalon", filter: (it) => it.categorie === "broek" },
-      { rol: "schoenen", omschrijving: "nette schoenen", filter: (it) => it.categorie === "schoenen" },
-      { rol: "jas", omschrijving: "colbert of blazer", filter: (it) => it.categorie === "jas" },
+      { rol: "basislaag", omschrijving: "net (effen) overhemd", filter: netGenoeg("top", 2, (it) => (it.laag || "basis") === "basis") },
+      { rol: "broek", omschrijving: "nette pantalon (geen jeans)", filter: netGenoeg("broek", 2) },
+      { rol: "schoenen", omschrijving: "nette veterschoenen of loafers (geen sneakers)", filter: netGenoeg("schoenen", 2) },
+      { rol: "jas", omschrijving: "colbert of blazer", filter: netGenoeg("jas", 2) },
     ],
   },
   {
     id: "bruiloft", label: "Bruiloft", emoji: "💒", categorie: "formeel",
     stijlen: ["Klassiek", "Smart casual"],
     vereist: [
-      { rol: "basislaag", omschrijving: "net (wit) overhemd", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
-      { rol: "broek", omschrijving: "nette pantalon", filter: (it) => it.categorie === "broek" },
-      { rol: "schoenen", omschrijving: "nette (leren) schoenen", filter: (it) => it.categorie === "schoenen" },
-      { rol: "jas", omschrijving: "colbert of pak", filter: (it) => it.categorie === "jas" },
+      { rol: "basislaag", omschrijving: "net (bij voorkeur wit) overhemd", filter: netGenoeg("top", 2, (it) => (it.laag || "basis") === "basis") },
+      { rol: "broek", omschrijving: "nette pantalon (geen jeans)", filter: netGenoeg("broek", 2) },
+      { rol: "schoenen", omschrijving: "nette leren schoenen (geen sneakers)", filter: netGenoeg("schoenen", 2) },
+      { rol: "jas", omschrijving: "colbert of (deel van) pak", filter: netGenoeg("jas", 2) },
       { rol: "accessoire", omschrijving: "stropdas of pochet", filter: (it) => it.categorie === "accessoire" && accessoireVorm(it.naam) === "das" },
     ],
   },
@@ -550,34 +591,50 @@ const GELEGENHEDEN = [
     id: "gala", label: "Gala", emoji: "🎩", categorie: "formeel",
     stijlen: ["Klassiek"],
     vereist: [
-      { rol: "basislaag", omschrijving: "smoking- of net wit overhemd", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
-      { rol: "broek", omschrijving: "nette (zwarte) pantalon", filter: (it) => it.categorie === "broek" },
-      { rol: "schoenen", omschrijving: "nette leren schoenen", filter: (it) => it.categorie === "schoenen" },
-      { rol: "jas", omschrijving: "smoking of colbert", filter: (it) => it.categorie === "jas" },
+      { rol: "basislaag", omschrijving: "smoking- of net wit overhemd", filter: netGenoeg("top", 2, (it) => (it.laag || "basis") === "basis") },
+      { rol: "broek", omschrijving: "nette (donkere) pantalon", filter: netGenoeg("broek", 2) },
+      { rol: "schoenen", omschrijving: "nette leren schoenen (geen sneakers)", filter: netGenoeg("schoenen", 2) },
+      { rol: "jas", omschrijving: "smoking of net colbert", filter: netGenoeg("jas", 2) },
       { rol: "accessoire", omschrijving: "vlinderdas of stropdas", filter: (it) => it.categorie === "accessoire" && accessoireVorm(it.naam) === "das" },
     ],
+    voorkeurKleuren: ["zwart", "navy"],
   },
   {
     id: "begrafenis", label: "Begrafenis", emoji: "🕯️", categorie: "formeel",
     stijlen: ["Klassiek", "Smart casual"],
     vereist: [
-      { rol: "basislaag", omschrijving: "net (donker) overhemd", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
-      { rol: "broek", omschrijving: "nette donkere broek", filter: (it) => it.categorie === "broek" },
-      { rol: "schoenen", omschrijving: "nette donkere schoenen", filter: (it) => it.categorie === "schoenen" },
-      { rol: "jas", omschrijving: "donker colbert", filter: (it) => it.categorie === "jas" },
+      { rol: "basislaag", omschrijving: "net (donker) overhemd", filter: netGenoeg("top", 2, (it) => (it.laag || "basis") === "basis") },
+      { rol: "broek", omschrijving: "nette donkere pantalon (geen jeans)", filter: netGenoeg("broek", 2) },
+      { rol: "schoenen", omschrijving: "nette donkere schoenen (geen sneakers)", filter: netGenoeg("schoenen", 2) },
+      { rol: "jas", omschrijving: "donker colbert", filter: netGenoeg("jas", 2) },
     ],
     voorkeurKleuren: ["zwart", "navy", "grijs"],
+    weerKleuren: ["geel", "groen", "lichtblauw", "bordeaux", "wit", "beige"],
   },
 ];
 
 // Stelt een gelegenheids-outfit samen: per vereiste rol het best passende stuk
 // dat schoon (of vies-met-waslabel) in de kast zit. Ontbreekt er iets, dan komt
 // die rol op de "nog kopen"-lijst. Retourneert de gekozen stukken plus de gaten.
-function genereerGelegenheid(items, gelegenheid, voorkeuren = {}) {
+function genereerGelegenheid(items, gelegenheid, voorkeuren = {}, weerVandaag = null) {
   const gekozen = [];
   const gebruikt = new Set();
   const ontbreekt = [];
   const passendeStijl = (it) => !gelegenheid.stijlen?.length || gelegenheid.stijlen.includes(it.stijl);
+
+  // Weer-bijsturing (zacht): de dresscode blijft leidend, maar het weer duwt.
+  // Koud (< 14 gr) -> een warme laag/jas wordt aangemoedigd en zelfs vereist,
+  // ook bij een nette gelegenheid. Warm (>= 22 gr) -> een dikke jas wordt juist
+  // ontmoedigd. Regen -> waterbestendige schoenen krijgen voorrang.
+  const temp = weerVandaag?.temp;
+  const regent = (weerVandaag?.regenkans ?? 0) >= 50;
+  const koud = typeof temp === "number" && temp < 14;
+  const warm = typeof temp === "number" && temp >= 22;
+  // Bij koud weer een jas afdwingen ook als de gelegenheid er niet om vroeg.
+  const eisenBasis = [...gelegenheid.vereist];
+  if (koud && !eisenBasis.some((e) => e.rol === "jas")) {
+    eisenBasis.push({ rol: "jas", omschrijving: "warme (nette) jas of laag — het is koud", filter: (it) => it.categorie === "jas", weerExtra: true });
+  }
 
   // De outfit wordt nu stuk-voor-stuk opgebouwd MET de combinatie-regels van de
   // weekplanner: elk volgend stuk wordt beoordeeld op hoe goed het past bij wat
@@ -587,11 +644,16 @@ function genereerGelegenheid(items, gelegenheid, voorkeuren = {}) {
   // We verwerken de eisen in een vaste, logische volgorde zodat de bovenlaag
   // eerst vaststaat en de broek/schoenen zich daarnaar kunnen voegen.
   const volgorde = ["basislaag", "overlaag", "broek", "schoenen", "jas", "accessoire"];
-  const eisen = [...gelegenheid.vereist].sort(
+  const eisen = [...eisenBasis].sort(
     (a, b) => volgorde.indexOf(a.rol) - volgorde.indexOf(b.rol)
   );
 
+  const jasInDresscode = gelegenheid.vereist.some((e) => e.rol === "jas");
   eisen.forEach((eis) => {
+    // Warm weer: een jas die alleen door de dresscode (niet door het weer) komt,
+    // slaan we over — je hoeft geen colbert te sjouwen bij 28 graden. Tenzij het
+    // een echt formele gelegenheid is waar de jas verplicht hoort.
+    if (eis.rol === "jas" && warm && jasInDresscode && gelegenheid.categorie !== "formeel") return;
     const kandidaten = items.filter((it) => eis.filter(it) && !gebruikt.has(it.id));
     if (!kandidaten.length) {
       ontbreekt.push(eis);
@@ -610,6 +672,22 @@ function genereerGelegenheid(items, gelegenheid, voorkeuren = {}) {
       if (!it.vies) s += 100;
       if (passendeStijl(it)) s += 40;
       if (gelegenheid.voorkeurKleuren?.length && itemKleurenIds(it).some((k) => gelegenheid.voorkeurKleuren.includes(k))) s += 15;
+      // Ongewenste kleuren voor deze gelegenheid (bijv. felle kleuren bij een
+      // begrafenis) worden zwaar afgestraft, zodat ze alleen als laatste
+      // redmiddel gekozen worden.
+      if (gelegenheid.weerKleuren?.length && itemKleurenIds(it).some((k) => gelegenheid.weerKleuren.includes(k))) s -= 80;
+
+      // Weer-bijsturing (zacht, als tiebreaker binnen de dresscode):
+      if (typeof temp === "number") {
+        const banden = it.tempBanden || [];
+        const dagBand = bandVanTemp(temp);
+        const dektWeer = banden.includes(dagBand);
+        // Stuk dat bij de temperatuur past krijgt een klein duwtje; een stuk dat
+        // er duidelijk naast zit (bijv. dikke winterjas bij 25 gr) een zetje omlaag.
+        if (banden.length) s += dektWeer ? 12 : -12;
+        // Bij regen: waterbestendige schoenen boven kwetsbare (leren) schoenen.
+        if (regent && eis.rol === "schoenen") s += it.regenOk === false ? -15 : 8;
+      }
 
       // Combinatie-regels t.o.v. de al gekozen stukken (dit is de nieuwe kern):
       // botsende kleuren en te veel patronen worden zwaar afgestraft, zodat het
@@ -625,6 +703,18 @@ function genereerGelegenheid(items, gelegenheid, voorkeuren = {}) {
     };
 
     const beste = [...kandidaten].sort((a, b) => score(b) - score(a))[0];
+
+    // Koop-push: is het beste beschikbare stuk eigenlijk niet net genoeg voor
+    // deze (formele) gelegenheid, dan tonen we het NIET als keuze maar zetten
+    // we de rol op de "nog kopen"-lijst — met de kanttekening dat wat je hebt
+    // niet volstaat. Zo pusht de app eerlijk om iets passends aan te schaffen.
+    const drempel = gelegenheid.categorie === "formeel" ? 2 : (gelegenheid.id === "restaurant" || gelegenheid.id === "date" ? 0 : -99);
+    const rolNetheid = ["basislaag", "broek", "schoenen", "jas"].includes(eis.rol) ? netheid(beste) : 99;
+    if (rolNetheid < drempel) {
+      ontbreekt.push({ ...eis, hebIetsMaarTeInformeel: true, dichtstbij: beste });
+      return;
+    }
+
     gebruikt.add(beste.id);
     gekozen.push({ rol: eis.rol, omschrijving: eis.omschrijving, item: beste, moetWassen: !!beste.vies });
   });
@@ -637,10 +727,6 @@ function genereerGelegenheid(items, gelegenheid, voorkeuren = {}) {
   return { gekozen, ontbreekt };
 }
 
-// Kleine helper: kleur-ids van een item (met terugval op enkelvoudige kleur).
-function itemKleurenIds(item) {
-  return item?.kleuren?.length ? item.kleuren : [item?.kleur].filter(Boolean);
-}
 
 function genereerPlan(items, weerDagen, stijl, voorkeuren = {}) {
   const historie = []; // per dag de Set met gebruikte item-ids
@@ -838,7 +924,10 @@ export default function GarderobeApp() {
     setGelegResultaat(null);
     // Korte onthullende animatie voordat het resultaat verschijnt.
     setTimeout(() => {
-      const res = genereerGelegenheid(items, gelegenheid, voorkeuren);
+      // Weer van vandaag meegeven zodat de gelegenheid-outfit met kou/regen
+      // rekening houdt (jas bij winter/regen, geen dikke jas bij hitte).
+      const weerVandaag = weer.find((w) => w.datum === vandaagISO()) || weer[0] || null;
+      const res = genereerGelegenheid(items, gelegenheid, voorkeuren, weerVandaag);
       setGelegResultaat({ gelegenheid, ...res });
       setGelegAnimatie(false);
     }, 1100);
@@ -1854,6 +1943,13 @@ export default function GarderobeApp() {
                   </button>
                 </div>
 
+                {gelegResultaat.ontbreekt.some((e) => ["basislaag", "broek", "schoenen"].includes(e.rol)) && (
+                  <div className="flex items-start gap-2 rounded-lg px-3 py-2 mb-4 text-sm" style={{ background: "#F9E9E4", color: KLEUREN.bordeaux }}>
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                    <span>Deze outfit is nog niet compleet voor {gelegResultaat.gelegenheid.label.toLowerCase()} — je kast mist een of meer passende, nette basisstukken. Zie het koopadvies onderaan.</span>
+                  </div>
+                )}
+
                 {gelegResultaat.gekozen.some((g) => g.moetWassen) && (
                   <div className="flex items-start gap-2 rounded-lg px-3 py-2 mb-4 text-sm" style={{ background: "#FBF3DC", color: KLEUREN.navy, border: `1px solid ${KLEUREN.goud}` }}>
                     <WashingMachine size={16} className="mt-0.5 shrink-0" />
@@ -1894,18 +1990,25 @@ export default function GarderobeApp() {
                 {gelegResultaat.ontbreekt.length > 0 && (
                   <div className="rounded-xl p-4" style={{ background: "#FDF6F4", border: `1px solid #EBCDC4` }}>
                     <h4 className="font-medium mb-2 flex items-center gap-2" style={{ fontFamily: "Georgia, serif", color: KLEUREN.bordeaux }}>
-                      <ShoppingBag size={17} /> Hiervoor mis je nog
+                      <ShoppingBag size={17} /> Hiervoor zou ik nog aanschaffen
                     </h4>
-                    <ul className="space-y-1.5">
+                    <ul className="space-y-2">
                       {gelegResultaat.ontbreekt.map((eis) => (
-                        <li key={eis.rol} className="flex items-baseline gap-2 text-sm">
-                          <span className="w-20 shrink-0 uppercase text-xs tracking-wide capitalize" style={{ color: KLEUREN.grijs }}>{eis.rol}</span>
-                          <span>{eis.omschrijving}</span>
+                        <li key={eis.rol} className="text-sm">
+                          <div className="flex items-baseline gap-2">
+                            <span className="w-20 shrink-0 uppercase text-xs tracking-wide capitalize" style={{ color: KLEUREN.grijs }}>{eis.rol}</span>
+                            <span className="font-medium">{eis.omschrijving}</span>
+                          </div>
+                          {eis.hebIetsMaarTeInformeel && eis.dichtstbij && (
+                            <p className="text-xs mt-0.5 ml-[5.5rem]" style={{ color: KLEUREN.bordeaux }}>
+                              Je hebt wel "{eis.dichtstbij.merk ? `${eis.dichtstbij.merk} — ` : ""}{eis.dichtstbij.naam}", maar dat is te casual voor deze gelegenheid.
+                            </p>
+                          )}
                         </li>
                       ))}
                     </ul>
                     <p className="text-xs mt-3" style={{ color: KLEUREN.grijs }}>
-                      Deze onderdelen zitten (schoon) niet in je kast. Voeg ze toe zodra je ze hebt, dan zijn ze er de volgende keer bij.
+                      Voor deze gelegenheid mist je kast passende, nette stukken. Schaf ze aan en voeg ze toe — dan stelt de app er meteen een complete outfit mee samen.
                     </p>
                   </div>
                 )}
