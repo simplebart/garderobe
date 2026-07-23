@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Settings2, X, Download, Upload, Pencil, Plane, MapPin, AlertTriangle } from "lucide-react";
+import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Settings2, X, Download, Upload, Pencil, Plane, MapPin, AlertTriangle, PartyPopper, ShoppingBag } from "lucide-react";
 
 // ---------- Constanten ----------
 const KLEUREN = {
@@ -452,6 +452,130 @@ function paklijstVanPlan(dagen, moetWassen, items) {
     .filter(Boolean);
 }
 
+// ---------- Gelegenheden ----------
+// Elke gelegenheid schrijft een dresscode voor: welke stijlen passen, en welke
+// onderdelen "vereist" zijn (met een korte omschrijving van wat je idealiter
+// hebt). Zo kan het systeem tonen wat je bezit én een "nog kopen"-lijstje maken
+// voor de gaten. "eigen" is de vrije-invoer-variant zonder harde eisen.
+const GELEGENHEDEN = [
+  {
+    id: "restaurant", label: "Restaurant", emoji: "🍽️", categorie: "uitgaan",
+    stijlen: ["Smart casual", "Klassiek", "Modern preppy"],
+    vereist: [
+      { rol: "basislaag", omschrijving: "nette basislaag (overhemd of polo)", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
+      { rol: "broek", omschrijving: "nette broek (chino of pantalon, geen short)", filter: (it) => it.categorie === "broek" },
+      { rol: "schoenen", omschrijving: "nette schoenen (geen sneakers)", filter: (it) => it.categorie === "schoenen" },
+    ],
+  },
+  {
+    id: "bioscoop", label: "Bioscoop", emoji: "🎬", categorie: "uitgaan",
+    stijlen: ["Casual", "Modern preppy", "Smart casual", "Sportief"],
+    vereist: [
+      { rol: "basislaag", omschrijving: "comfortabel bovenstuk", filter: (it) => it.categorie === "top" },
+      { rol: "broek", omschrijving: "broek naar keuze", filter: (it) => it.categorie === "broek" },
+      { rol: "schoenen", omschrijving: "schoenen naar keuze", filter: (it) => it.categorie === "schoenen" },
+    ],
+  },
+  {
+    id: "date", label: "Date", emoji: "💐", categorie: "uitgaan",
+    stijlen: ["Smart casual", "Modern preppy", "Klassiek"],
+    vereist: [
+      { rol: "basislaag", omschrijving: "verzorgd bovenstuk", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
+      { rol: "broek", omschrijving: "nette broek", filter: (it) => it.categorie === "broek" },
+      { rol: "schoenen", omschrijving: "verzorgde schoenen", filter: (it) => it.categorie === "schoenen" },
+    ],
+  },
+  {
+    id: "borrel", label: "Borrel / feestje", emoji: "🥂", categorie: "uitgaan",
+    stijlen: ["Smart casual", "Modern preppy", "Casual"],
+    vereist: [
+      { rol: "basislaag", omschrijving: "leuk bovenstuk", filter: (it) => it.categorie === "top" },
+      { rol: "broek", omschrijving: "broek naar keuze", filter: (it) => it.categorie === "broek" },
+      { rol: "schoenen", omschrijving: "schoenen naar keuze", filter: (it) => it.categorie === "schoenen" },
+    ],
+  },
+  {
+    id: "sollicitatie", label: "Sollicitatie", emoji: "💼", categorie: "formeel",
+    stijlen: ["Klassiek", "Smart casual"],
+    vereist: [
+      { rol: "basislaag", omschrijving: "net overhemd", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
+      { rol: "broek", omschrijving: "nette pantalon", filter: (it) => it.categorie === "broek" },
+      { rol: "schoenen", omschrijving: "nette schoenen", filter: (it) => it.categorie === "schoenen" },
+      { rol: "jas", omschrijving: "colbert of blazer", filter: (it) => it.categorie === "jas" },
+    ],
+  },
+  {
+    id: "bruiloft", label: "Bruiloft", emoji: "💒", categorie: "formeel",
+    stijlen: ["Klassiek", "Smart casual"],
+    vereist: [
+      { rol: "basislaag", omschrijving: "net (wit) overhemd", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
+      { rol: "broek", omschrijving: "nette pantalon", filter: (it) => it.categorie === "broek" },
+      { rol: "schoenen", omschrijving: "nette (leren) schoenen", filter: (it) => it.categorie === "schoenen" },
+      { rol: "jas", omschrijving: "colbert of pak", filter: (it) => it.categorie === "jas" },
+      { rol: "accessoire", omschrijving: "stropdas of pochet", filter: (it) => it.categorie === "accessoire" && accessoireVorm(it.naam) === "das" },
+    ],
+  },
+  {
+    id: "gala", label: "Gala", emoji: "🎩", categorie: "formeel",
+    stijlen: ["Klassiek"],
+    vereist: [
+      { rol: "basislaag", omschrijving: "smoking- of net wit overhemd", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
+      { rol: "broek", omschrijving: "nette (zwarte) pantalon", filter: (it) => it.categorie === "broek" },
+      { rol: "schoenen", omschrijving: "nette leren schoenen", filter: (it) => it.categorie === "schoenen" },
+      { rol: "jas", omschrijving: "smoking of colbert", filter: (it) => it.categorie === "jas" },
+      { rol: "accessoire", omschrijving: "vlinderdas of stropdas", filter: (it) => it.categorie === "accessoire" && accessoireVorm(it.naam) === "das" },
+    ],
+  },
+  {
+    id: "begrafenis", label: "Begrafenis", emoji: "🕯️", categorie: "formeel",
+    stijlen: ["Klassiek", "Smart casual"],
+    vereist: [
+      { rol: "basislaag", omschrijving: "net (donker) overhemd", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
+      { rol: "broek", omschrijving: "nette donkere broek", filter: (it) => it.categorie === "broek" },
+      { rol: "schoenen", omschrijving: "nette donkere schoenen", filter: (it) => it.categorie === "schoenen" },
+      { rol: "jas", omschrijving: "donker colbert", filter: (it) => it.categorie === "jas" },
+    ],
+    voorkeurKleuren: ["zwart", "navy", "grijs"],
+  },
+];
+
+// Stelt een gelegenheids-outfit samen: per vereiste rol het best passende stuk
+// dat schoon (of vies-met-waslabel) in de kast zit. Ontbreekt er iets, dan komt
+// die rol op de "nog kopen"-lijst. Retourneert de gekozen stukken plus de gaten.
+function genereerGelegenheid(items, gelegenheid) {
+  const gekozen = [];
+  const gebruikt = new Set();
+  const ontbreekt = [];
+  const passendeStijl = (it) => !gelegenheid.stijlen?.length || gelegenheid.stijlen.includes(it.stijl);
+
+  gelegenheid.vereist.forEach((eis) => {
+    const kandidaten = items.filter((it) => eis.filter(it) && !gebruikt.has(it.id));
+    if (!kandidaten.length) {
+      ontbreekt.push(eis);
+      return;
+    }
+    // Rangschik: schoon boven vies, juiste stijl boven andere stijl, en bij een
+    // begrafenis/gala de voorkeurskleuren eerst.
+    const score = (it) => {
+      let s = 0;
+      if (!it.vies) s += 100;
+      if (passendeStijl(it)) s += 40;
+      if (gelegenheid.voorkeurKleuren?.length && itemKleurenIds(it).some((k) => gelegenheid.voorkeurKleuren.includes(k))) s += 20;
+      return s;
+    };
+    const beste = [...kandidaten].sort((a, b) => score(b) - score(a))[0];
+    gebruikt.add(beste.id);
+    gekozen.push({ rol: eis.rol, omschrijving: eis.omschrijving, item: beste, moetWassen: !!beste.vies });
+  });
+
+  return { gekozen, ontbreekt };
+}
+
+// Kleine helper: kleur-ids van een item (met terugval op enkelvoudige kleur).
+function itemKleurenIds(item) {
+  return item?.kleuren?.length ? item.kleuren : [item?.kleur].filter(Boolean);
+}
+
 function genereerPlan(items, weerDagen, stijl) {
   const historie = []; // per dag de Set met gebruikte item-ids
   const gebruikTeller = new Map(); // hoe vaak elk stuk in dit plan zit
@@ -491,6 +615,11 @@ export default function GarderobeApp() {
   const [reisLaadt, setReisLaadt] = useState(false);
   const [reisFout, setReisFout] = useState("");
   const [reisResultaat, setReisResultaat] = useState(null); // { plaatsnaam, dagen, paklijst, tekorten }
+  // Gelegenheid-modus
+  const [gelegKeuze, setGelegKeuze] = useState(null); // gekozen gelegenheid-id of "eigen"
+  const [gelegEigen, setGelegEigen] = useState("");
+  const [gelegResultaat, setGelegResultaat] = useState(null);
+  const [gelegAnimatie, setGelegAnimatie] = useState(false);
   const [geladen, setGeladen] = useState(false);
   const [beheerOpen, setBeheerOpen] = useState(false);
   const [nieuweKleur, setNieuweKleur] = useState({ label: "", hex: "#888888" });
@@ -631,6 +760,34 @@ export default function GarderobeApp() {
       setReisFout(e.message || "Er ging iets mis bij het ophalen van het weer.");
     }
     setReisLaadt(false);
+  }
+
+  function kiesGelegenheid(gelegenheid) {
+    setGelegKeuze(gelegenheid.id);
+    setGelegAnimatie(true);
+    setGelegResultaat(null);
+    // Korte onthullende animatie voordat het resultaat verschijnt.
+    setTimeout(() => {
+      const res = genereerGelegenheid(items, gelegenheid);
+      setGelegResultaat({ gelegenheid, ...res });
+      setGelegAnimatie(false);
+    }, 1100);
+  }
+
+  function kiesEigenGelegenheid() {
+    const naam = gelegEigen.trim();
+    if (!naam) return;
+    // Vrije invoer: geen harde dresscode, gebruik de gekozen stijl en vraag om
+    // de basisonderdelen. Geen koopadvies, want we weten de eisen niet.
+    const gelegenheid = {
+      id: "eigen", label: naam, emoji: "✨", stijlen: [stijl],
+      vereist: [
+        { rol: "basislaag", omschrijving: "bovenstuk", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
+        { rol: "broek", omschrijving: "broek", filter: (it) => it.categorie === "broek" },
+        { rol: "schoenen", omschrijving: "schoenen", filter: (it) => it.categorie === "schoenen" },
+      ],
+    };
+    kiesGelegenheid(gelegenheid);
   }
 
   function maakPlan() {
@@ -1239,6 +1396,9 @@ export default function GarderobeApp() {
           <button onClick={() => setTab("vakantie")} className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium" style={knopStijl(tab === "vakantie")}>
             <Plane size={15} /> Vakantie
           </button>
+          <button onClick={() => setTab("gelegenheid")} className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium" style={knopStijl(tab === "gelegenheid")}>
+            <PartyPopper size={15} /> Gelegenheid
+          </button>
           <button onClick={() => setTab("kast")} className="px-4 py-2 rounded-full text-sm font-medium" style={knopStijl(tab === "kast")}>
             Kledingkast ({items.length})
           </button>
@@ -1436,6 +1596,160 @@ export default function GarderobeApp() {
                 );
               })}
             </div>
+          </section>
+        )}
+
+        {/* ---------- GELEGENHEID ---------- */}
+        {tab === "gelegenheid" && (
+          <section>
+            <div className="rounded-xl p-4 mb-5" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+              <h2 className="font-medium mb-1 flex items-center gap-2" style={{ fontFamily: "Georgia, serif" }}>
+                <PartyPopper size={18} /> Wat trek ik aan voor…
+              </h2>
+              <p className="text-xs mb-3" style={{ color: KLEUREN.grijs }}>
+                Kies een gelegenheid. De app stelt een passende outfit samen uit je kast — en laat zien
+                wat je nog mist voor de nettere gelegenheden.
+              </p>
+
+              <p className="uppercase text-xs tracking-widest mb-1.5" style={{ color: KLEUREN.bordeaux, letterSpacing: "0.12em" }}>Uitgaan</p>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {GELEGENHEDEN.filter((g) => g.categorie === "uitgaan").map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => kiesGelegenheid(g)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"
+                    style={{
+                      background: gelegKeuze === g.id ? KLEUREN.navy : KLEUREN.ivoor,
+                      color: gelegKeuze === g.id ? KLEUREN.ivoor : KLEUREN.navy,
+                      border: `1.5px solid ${gelegKeuze === g.id ? KLEUREN.navy : KLEUREN.lijn}`,
+                    }}
+                  >
+                    <span>{g.emoji}</span> {g.label}
+                  </button>
+                ))}
+              </div>
+
+              <p className="uppercase text-xs tracking-widest mb-1.5" style={{ color: KLEUREN.bordeaux, letterSpacing: "0.12em" }}>Formeel</p>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {GELEGENHEDEN.filter((g) => g.categorie === "formeel").map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => kiesGelegenheid(g)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"
+                    style={{
+                      background: gelegKeuze === g.id ? KLEUREN.navy : KLEUREN.ivoor,
+                      color: gelegKeuze === g.id ? KLEUREN.ivoor : KLEUREN.navy,
+                      border: `1.5px solid ${gelegKeuze === g.id ? KLEUREN.navy : KLEUREN.lijn}`,
+                    }}
+                  >
+                    <span>{g.emoji}</span> {g.label}
+                  </button>
+                ))}
+              </div>
+
+              <p className="uppercase text-xs tracking-widest mb-1.5" style={{ color: KLEUREN.bordeaux, letterSpacing: "0.12em" }}>Iets anders</p>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  value={gelegEigen}
+                  onChange={(e) => setGelegEigen(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && kiesEigenGelegenheid()}
+                  placeholder="Typ een eigen gelegenheid, bijv. Concert"
+                  className="flex-1 min-w-48 px-3 py-2 rounded-lg text-sm"
+                  style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
+                />
+                <button
+                  onClick={kiesEigenGelegenheid}
+                  disabled={!gelegEigen.trim() || !items.length}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                  style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}
+                >
+                  <Sparkles size={16} /> Stel voor
+                </button>
+              </div>
+              {!items.length && (
+                <p className="text-xs mt-3" style={{ color: KLEUREN.bordeaux }}>Je kast is nog leeg — voeg eerst kledingstukken toe.</p>
+              )}
+            </div>
+
+            {/* Onthullende animatie */}
+            {gelegAnimatie && (
+              <div className="rounded-xl p-10 mb-5 flex flex-col items-center justify-center gap-3" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                <div style={{ animation: "gTol 1s ease-in-out infinite" }}>
+                  <Sparkles size={40} style={{ color: KLEUREN.goud }} />
+                </div>
+                <p className="text-sm" style={{ color: KLEUREN.grijs }}>Een passende outfit samenstellen…</p>
+                <style>{`@keyframes gTol { 0%,100% { transform: translateY(0) rotate(-8deg); opacity:.7 } 50% { transform: translateY(-8px) rotate(8deg); opacity:1 } }`}</style>
+              </div>
+            )}
+
+            {/* Resultaat */}
+            {gelegResultaat && !gelegAnimatie && (
+              <div style={{ animation: "gIn .5s ease-out" }}>
+                <style>{`@keyframes gIn { from { opacity:0; transform: translateY(10px) } to { opacity:1; transform:none } }`}</style>
+                <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                  <h3 className="text-lg flex items-center gap-2" style={{ fontFamily: "Georgia, serif" }}>
+                    <span>{gelegResultaat.gelegenheid.emoji}</span> Outfit voor {gelegResultaat.gelegenheid.label}
+                  </h3>
+                  <button
+                    onClick={() => { setGelegResultaat(null); setGelegKeuze(null); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm shrink-0"
+                    style={{ border: `1.5px solid ${KLEUREN.lijn}`, color: KLEUREN.grijs }}
+                  >
+                    <X size={14} /> Sluiten
+                  </button>
+                </div>
+
+                {gelegResultaat.gekozen.some((g) => g.moetWassen) && (
+                  <div className="flex items-start gap-2 rounded-lg px-3 py-2 mb-4 text-sm" style={{ background: "#FBF3DC", color: KLEUREN.navy, border: `1px solid ${KLEUREN.goud}` }}>
+                    <WashingMachine size={16} className="mt-0.5 shrink-0" />
+                    <span>Een of meer voorgestelde stukken zijn nu nog vies — was ze op tijd (ze staan gemarkeerd).</span>
+                  </div>
+                )}
+
+                {/* Gekozen stukken */}
+                <div className="rounded-xl p-4 mb-5" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                  <ul className="space-y-2">
+                    {gelegResultaat.gekozen.map((g) => (
+                      <li key={g.rol} className="flex items-center gap-3 text-sm">
+                        <span className="w-20 shrink-0 uppercase text-xs tracking-wide capitalize" style={{ color: KLEUREN.grijs }}>{g.rol}</span>
+                        <span className="flex items-center gap-3 min-w-0 flex-1">
+                          <ItemBeeld item={g.item} grootte={44} />
+                          <span className="min-w-0">
+                            <span className="block truncate">{g.item.merk ? `${g.item.merk} — ` : ""}{g.item.naam}</span>
+                            <span className="block text-xs" style={{ color: KLEUREN.grijs }}>{kleurenTekst(g.item)}</span>
+                          </span>
+                        </span>
+                        {g.moetWassen && (
+                          <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: "#FBF3DC", color: KLEUREN.bordeaux, border: `1px solid ${KLEUREN.goud}` }}>
+                            <WashingMachine size={12} /> nog wassen
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Nog kopen */}
+                {gelegResultaat.ontbreekt.length > 0 && (
+                  <div className="rounded-xl p-4" style={{ background: "#FDF6F4", border: `1px solid #EBCDC4` }}>
+                    <h4 className="font-medium mb-2 flex items-center gap-2" style={{ fontFamily: "Georgia, serif", color: KLEUREN.bordeaux }}>
+                      <ShoppingBag size={17} /> Hiervoor mis je nog
+                    </h4>
+                    <ul className="space-y-1.5">
+                      {gelegResultaat.ontbreekt.map((eis) => (
+                        <li key={eis.rol} className="flex items-baseline gap-2 text-sm">
+                          <span className="w-20 shrink-0 uppercase text-xs tracking-wide capitalize" style={{ color: KLEUREN.grijs }}>{eis.rol}</span>
+                          <span>{eis.omschrijving}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-xs mt-3" style={{ color: KLEUREN.grijs }}>
+                      Deze onderdelen zitten (schoon) niet in je kast. Voeg ze toe zodra je ze hebt, dan zijn ze er de volgende keer bij.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </section>
         )}
 
