@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Settings2, X, Download, Upload, Pencil, Plane, MapPin, AlertTriangle, PartyPopper, ShoppingBag } from "lucide-react";
+import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Settings2, X, Download, Upload, Pencil, Plane, MapPin, AlertTriangle, PartyPopper, ShoppingBag, ThumbsUp, ThumbsDown } from "lucide-react";
 
 // ---------- Constanten ----------
 const KLEUREN = {
@@ -279,7 +279,31 @@ const kleurenBotsen = (a, b) => {
 };
 
 // ---------- Outfitgenerator ----------
-function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = new Map()) {
+// ---------- Voorkeuren (like/dislike op combinaties) ----------
+// We leren per PAAR van stukken: koppel "shirt A + broek B" aan een score.
+// Een like duwt de score omhoog, een dislike omlaag. De sleutel is orde-
+// onafhankelijk (A|B == B|A) zodat elk paar maar één waarde heeft.
+const paarSleutel = (a, b) => [a, b].sort().join("|");
+
+// Verzamelt alle paren binnen een outfit (alle stukken twee-aan-twee).
+function outfitParen(outfit) {
+  const ids = Object.values(outfit).flat().filter(Boolean).map((it) => it.id);
+  const paren = [];
+  for (let i = 0; i < ids.length; i++)
+    for (let j = i + 1; j < ids.length; j++) paren.push(paarSleutel(ids[i], ids[j]));
+  return paren;
+}
+
+// Zachte voorkeursscore voor een kandidaat-stuk gegeven wat al gekozen is:
+// som van de paar-scores met de reeds gekozen stukken. Wordt als lichte duw
+// gebruikt bij de keuze, nooit als harde regel.
+function voorkeurScore(kandidaatId, gekozenIds, voorkeuren) {
+  let s = 0;
+  gekozenIds.forEach((gid) => { s += voorkeuren[paarSleutel(kandidaatId, gid)] || 0; });
+  return s;
+}
+
+function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = new Map(), voorkeuren = {}) {
   const dagBand = bandVanTemp(dag.temp);
   const regent = dag.regenkans >= 50;
   const vandaag = new Set();
@@ -327,7 +351,14 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
         // de garderobe gelijkmatig rouleert i.p.v. steeds dezelfde favoriet.
         const minst = Math.min(...bruikbaar.map((it) => gebruikTeller.get(it.id) || 0));
         const zeldzaam = bruikbaar.filter((it) => (gebruikTeller.get(it.id) || 0) === minst);
-        const keuze = zeldzaam[Math.floor(Math.random() * zeldzaam.length)];
+        // Zachte duw van je like/dislike-feedback: binnen de zeldzame stukken
+        // krijgen combinaties die je eerder goed vond voorrang, maar alleen als
+        // tiebreaker — de regels hierboven blijven leidend.
+        const reedsGekozen = [...vandaag];
+        const besteScore = Math.max(...zeldzaam.map((it) => voorkeurScore(it.id, reedsGekozen, voorkeuren)));
+        const voorkeurPool = zeldzaam.filter((it) => voorkeurScore(it.id, reedsGekozen, voorkeuren) === besteScore);
+        const kandidatenFinaal = voorkeurPool.length ? voorkeurPool : zeldzaam;
+        const keuze = kandidatenFinaal[Math.floor(Math.random() * kandidatenFinaal.length)];
         vandaag.add(keuze.id);
         gebruikTeller.set(keuze.id, (gebruikTeller.get(keuze.id) || 0) + 1);
         return keuze;
@@ -400,7 +431,7 @@ const TERUGKIJK_DAGEN = 2; // een stuk komt niet binnen 2 dagen terug
 // daarna doet het niet meer mee. Een stuk dat nu al vies is mag wél gekozen
 // worden, maar krijgt het label "wassen voor vertrek". Lukt een categorie
 // helemaal niet meer (alles op), dan meldt de planner dat als tekort.
-function genereerVakantie(items, weerDagen, stijl) {
+function genereerVakantie(items, weerDagen, stijl, voorkeuren = {}) {
   // Resterende draagbeurten per stuk voor deze reis. Een vies stuk telt als
   // 0 gedragen (na wassen weer helemaal fris), maar houdt zijn "moetWassen".
   const rest = new Map();
@@ -420,7 +451,7 @@ function genereerVakantie(items, weerDagen, stijl) {
     // tijdelijk uitgeschakeld (op reis mag vies mee) en de opgebruikte stukken
     // eruit gefilterd.
     const reisItems = beschikbaar.map((it) => ({ ...it, vies: false }));
-    const { outfit, gebruikt } = genereerDag(reisItems, dag, stijl, vermijden, gebruikTeller);
+    const { outfit, gebruikt } = genereerDag(reisItems, dag, stijl, vermijden, gebruikTeller, voorkeuren);
     // Draagbeurten afboeken en tekorten registreren.
     const platteOutfit = Object.entries(outfit);
     platteOutfit.forEach(([sleutel, waarde]) => {
@@ -542,7 +573,7 @@ const GELEGENHEDEN = [
 // Stelt een gelegenheids-outfit samen: per vereiste rol het best passende stuk
 // dat schoon (of vies-met-waslabel) in de kast zit. Ontbreekt er iets, dan komt
 // die rol op de "nog kopen"-lijst. Retourneert de gekozen stukken plus de gaten.
-function genereerGelegenheid(items, gelegenheid) {
+function genereerGelegenheid(items, gelegenheid, voorkeuren = {}) {
   const gekozen = [];
   const gebruikt = new Set();
   const ontbreekt = [];
@@ -556,11 +587,14 @@ function genereerGelegenheid(items, gelegenheid) {
     }
     // Rangschik: schoon boven vies, juiste stijl boven andere stijl, en bij een
     // begrafenis/gala de voorkeurskleuren eerst.
+    const gekozenIds = gekozen.map((g) => g.item.id);
     const score = (it) => {
       let s = 0;
       if (!it.vies) s += 100;
       if (passendeStijl(it)) s += 40;
       if (gelegenheid.voorkeurKleuren?.length && itemKleurenIds(it).some((k) => gelegenheid.voorkeurKleuren.includes(k))) s += 20;
+      // Zachte duw van je feedback op eerdere combinaties (tiebreaker).
+      s += voorkeurScore(it.id, gekozenIds, voorkeuren);
       return s;
     };
     const beste = [...kandidaten].sort((a, b) => score(b) - score(a))[0];
@@ -576,7 +610,7 @@ function itemKleurenIds(item) {
   return item?.kleuren?.length ? item.kleuren : [item?.kleur].filter(Boolean);
 }
 
-function genereerPlan(items, weerDagen, stijl) {
+function genereerPlan(items, weerDagen, stijl, voorkeuren = {}) {
   const historie = []; // per dag de Set met gebruikte item-ids
   const gebruikTeller = new Map(); // hoe vaak elk stuk in dit plan zit
   // Resterende draagbeurten: begint bij (maxDraag - al gedragen). Zo plant de
@@ -591,7 +625,7 @@ function genereerPlan(items, weerDagen, stijl) {
     // Stukken zonder resterende beurten doen niet mee (behalve dat ze al via
     // it.vies zouden afvallen — dit vangt de gevallen die binnen het plan opraken).
     const beschikbaar = items.filter((it) => (rest.get(it.id) || 0) > 0 || it.maxDraag >= 900);
-    const { outfit, gebruikt } = genereerDag(beschikbaar, dag, stijl, vermijden, gebruikTeller);
+    const { outfit, gebruikt } = genereerDag(beschikbaar, dag, stijl, vermijden, gebruikTeller, voorkeuren);
     gebruikt.forEach((id) => rest.set(id, (rest.get(id) || 1) - 1));
     historie.push(gebruikt);
     return { ...dag, outfit, gedragen: false };
@@ -620,6 +654,9 @@ export default function GarderobeApp() {
   const [gelegEigen, setGelegEigen] = useState("");
   const [gelegResultaat, setGelegResultaat] = useState(null);
   const [gelegAnimatie, setGelegAnimatie] = useState(false);
+  // Geleerde combinatie-voorkeuren: { "idA|idB": score }. Positief = vaker,
+  // negatief = minder vaak. Wordt bewaard en gesynchroniseerd als de rest.
+  const [voorkeuren, setVoorkeuren] = useState({});
   const [geladen, setGeladen] = useState(false);
   const [beheerOpen, setBeheerOpen] = useState(false);
   const [nieuweKleur, setNieuweKleur] = useState({ label: "", hex: "#888888" });
@@ -654,6 +691,7 @@ export default function GarderobeApp() {
         // Vakantieplan blijft bewaard tot je het wist of een nieuw maakt.
         if (data.reis) setReis(data.reis);
         if (data.reisResultaat) setReisResultaat(data.reisResultaat);
+        if (data.voorkeuren) setVoorkeuren(data.voorkeuren);
       }
     } catch (e) {
       /* nog niets opgeslagen of onleesbaar */
@@ -680,13 +718,13 @@ export default function GarderobeApp() {
     if (!geladen) return;
     if (eersteOpslag.current) { eersteOpslag.current = false; return; }
     try {
-      localStorage.setItem(OPSLAG_SLEUTEL, JSON.stringify({ items, stijl, plan, kleuren, stijlen, reis, reisResultaat }));
+      localStorage.setItem(OPSLAG_SLEUTEL, JSON.stringify({ items, stijl, plan, kleuren, stijlen, reis, reisResultaat, voorkeuren }));
       localStorage.setItem(GEWIJZIGD_SLEUTEL, String(Date.now()));
     } catch (e) {
       console.error("Opslaan mislukt", e);
       alert("Opslaan mislukt — de browseropslag lijkt vol te zitten.");
     }
-  }, [items, stijl, plan, kleuren, stijlen, reis, reisResultaat, geladen]);
+  }, [items, stijl, plan, kleuren, stijlen, reis, reisResultaat, voorkeuren, geladen]);
 
   async function haalWeerOp() {
     setWeerLaadt(true);
@@ -745,7 +783,7 @@ export default function GarderobeApp() {
         d.setDate(d.getDate() + 1);
         weerDagen.push({ ...laatste, datum: d.toISOString().slice(0, 10), geschat: true });
       }
-      const { dagen, moetWassen, tekorten } = genereerVakantie(items, weerDagen, stijl);
+      const { dagen, moetWassen, tekorten } = genereerVakantie(items, weerDagen, stijl, voorkeuren);
       const paklijst = paklijstVanPlan(dagen, moetWassen, items);
       setReisResultaat({
         plaatsnaam: country ? `${name}, ${country}` : name,
@@ -768,7 +806,7 @@ export default function GarderobeApp() {
     setGelegResultaat(null);
     // Korte onthullende animatie voordat het resultaat verschijnt.
     setTimeout(() => {
-      const res = genereerGelegenheid(items, gelegenheid);
+      const res = genereerGelegenheid(items, gelegenheid, voorkeuren);
       setGelegResultaat({ gelegenheid, ...res });
       setGelegAnimatie(false);
     }, 1100);
@@ -798,7 +836,7 @@ export default function GarderobeApp() {
       );
       if (!ok) return;
     }
-    setPlan(genereerPlan(items, weer, stijl));
+    setPlan(genereerPlan(items, weer, stijl, voorkeuren));
   }
 
   function registreerGedragen(dagIndex) {
@@ -827,6 +865,35 @@ export default function GarderobeApp() {
     );
   }
 
+  // Verwerkt duim omhoog/omlaag op een outfit: elk paar stukken erin krijgt
+  // een lichte plus of min. Meermaals liken stapelt (tot een zacht plafond),
+  // zodat de duw merkbaar maar nooit allesbepalend wordt.
+  const FEEDBACK_STAP = 2;
+  const FEEDBACK_PLAFOND = 8;
+  function beoordeelOutfit(outfit, positief) {
+    const paren = outfitParen(outfit);
+    if (!paren.length) return;
+    setVoorkeuren((prev) => {
+      const nw = { ...prev };
+      paren.forEach((p) => {
+        const huidig = nw[p] || 0;
+        const delta = positief ? FEEDBACK_STAP : -FEEDBACK_STAP;
+        let nieuw = huidig + delta;
+        nieuw = Math.max(-FEEDBACK_PLAFOND, Math.min(FEEDBACK_PLAFOND, nieuw));
+        if (nieuw === 0) delete nw[p]; else nw[p] = nieuw;
+      });
+      return nw;
+    });
+  }
+
+  // Gemiddelde voorkeurstemming van een outfit: >0 = eerder geliked, <0 = disliked.
+  function outfitStemming(outfit) {
+    const paren = outfitParen(outfit);
+    if (!paren.length) return 0;
+    const som = paren.reduce((t, p) => t + (voorkeuren[p] || 0), 0);
+    return som / paren.length;
+  }
+
   function wasAlles() {
     setItems((prev) => prev.map((it) => ({ ...it, vies: false, draagTeller: 0 })));
   }
@@ -848,7 +915,7 @@ export default function GarderobeApp() {
       if (!buurdag) return;
       Object.values(buurdag.outfit).flat().filter(Boolean).forEach((it) => vermijden.add(it.id));
     });
-    const { outfit } = genereerDag(items, actueel, stijl, vermijden);
+    const { outfit } = genereerDag(items, actueel, stijl, vermijden, new Map(), voorkeuren);
     setPlan((prev) =>
       prev.map((d, j) => (j === i ? { ...d, temp: actueel.temp, regenkans: actueel.regenkans, outfit } : d))
     );
@@ -1007,6 +1074,7 @@ export default function GarderobeApp() {
     setPlan(planNogGeldig(data.plan) ? data.plan : []);
     if (data.reis) setReis(data.reis);
     setReisResultaat(data.reisResultaat || null);
+    if (data.voorkeuren) setVoorkeuren(data.voorkeuren);
     return true;
   }
 
@@ -1051,7 +1119,7 @@ export default function GarderobeApp() {
       const res = await fetch(cfg.url, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ geheim: cfg.geheim, data: { items, stijl, plan, kleuren, stijlen, reis, reisResultaat, gewijzigd: Date.now() } }),
+        body: JSON.stringify({ geheim: cfg.geheim, data: { items, stijl, plan, kleuren, stijlen, reis, reisResultaat, voorkeuren, gewijzigd: Date.now() } }),
       });
       const j = await res.json();
       if (j.fout) throw new Error(j.fout);
@@ -1140,6 +1208,58 @@ export default function GarderobeApp() {
   ];
 
   // ---------- UI-onderdelen ----------
+  // Zet een opgeslagen paar-sleutel ("idA|idB") om naar leesbare itemnamen.
+  const paarNamen = (sleutel) => {
+    return sleutel.split("|").map((id) => {
+      const it = items.find((x) => x.id === id);
+      return it ? (it.merk ? `${it.merk} ${it.naam}` : it.naam) : "onbekend";
+    });
+  };
+  // Alleen paren tonen waarvan beide stukken nog bestaan.
+  const zichtbareVoorkeuren = Object.entries(voorkeuren)
+    .filter(([sleutel]) => sleutel.split("|").every((id) => items.some((x) => x.id === id)))
+    .sort((a, b) => b[1] - a[1]);
+
+  function wisVoorkeur(sleutel) {
+    setVoorkeuren((prev) => {
+      const nw = { ...prev };
+      delete nw[sleutel];
+      return nw;
+    });
+  }
+
+  const OutfitFeedback = ({ outfit }) => {
+    const stemming = outfitStemming(outfit);
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => beoordeelOutfit(outfit, true)}
+          className="flex items-center justify-center w-8 h-8 rounded-full transition-transform active:scale-90"
+          style={{
+            background: stemming > 0 ? KLEUREN.groen : "transparent",
+            color: stemming > 0 ? KLEUREN.ivoor : KLEUREN.groen,
+            border: `1.5px solid ${KLEUREN.groen}`,
+          }}
+          title="Deze combinatie bevalt me — vaker voorstellen"
+        >
+          <ThumbsUp size={15} />
+        </button>
+        <button
+          onClick={() => beoordeelOutfit(outfit, false)}
+          className="flex items-center justify-center w-8 h-8 rounded-full transition-transform active:scale-90"
+          style={{
+            background: stemming < 0 ? KLEUREN.bordeaux : "transparent",
+            color: stemming < 0 ? KLEUREN.ivoor : KLEUREN.bordeaux,
+            border: `1.5px solid ${KLEUREN.bordeaux}`,
+          }}
+          title="Deze combinatie liever niet"
+        >
+          <ThumbsDown size={15} />
+        </button>
+      </div>
+    );
+  };
+
   const WeerIcoon = ({ regenkans, temp }) =>
     regenkans >= 50 ? <CloudRain size={18} /> : temp >= 19 ? <Sun size={18} /> : <Cloud size={18} />;
 
@@ -1583,14 +1703,17 @@ export default function GarderobeApp() {
                         </li>
                       ))}
                     </ul>
-                    <button
-                      onClick={() => registreerGedragen(i)}
-                      disabled={dag.gedragen}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-60"
-                      style={{ background: dag.gedragen ? KLEUREN.groen : "transparent", color: dag.gedragen ? KLEUREN.ivoor : KLEUREN.groen, border: `1.5px solid ${KLEUREN.groen}` }}
-                    >
-                      <Check size={15} /> {dag.gedragen ? "Gedragen geregistreerd" : "Ik draag dit"}
-                    </button>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <button
+                        onClick={() => registreerGedragen(i)}
+                        disabled={dag.gedragen}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-60"
+                        style={{ background: dag.gedragen ? KLEUREN.groen : "transparent", color: dag.gedragen ? KLEUREN.ivoor : KLEUREN.groen, border: `1.5px solid ${KLEUREN.groen}` }}
+                      >
+                        <Check size={15} /> {dag.gedragen ? "Gedragen geregistreerd" : "Ik draag dit"}
+                      </button>
+                      <OutfitFeedback outfit={dag.outfit} />
+                    </div>
                   </div>
                 </article>
                 );
@@ -1727,6 +1850,12 @@ export default function GarderobeApp() {
                       </li>
                     ))}
                   </ul>
+                  {gelegResultaat.gekozen.length > 0 && (
+                    <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
+                      <span className="text-xs" style={{ color: KLEUREN.grijs }}>Bevalt deze combinatie?</span>
+                      <OutfitFeedback outfit={Object.fromEntries(gelegResultaat.gekozen.map((g) => [g.rol, g.item]))} />
+                    </div>
+                  )}
                 </div>
 
                 {/* Nog kopen */}
@@ -1920,6 +2049,10 @@ export default function GarderobeApp() {
                             </li>
                           ))}
                         </ul>
+                        <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
+                          <span className="text-xs" style={{ color: KLEUREN.grijs }}>Bevalt deze combinatie?</span>
+                          <OutfitFeedback outfit={dag.outfit} />
+                        </div>
                       </div>
                     </article>
                   ))}
@@ -2086,6 +2219,37 @@ export default function GarderobeApp() {
                 <input type="file" accept="application/json,.json" onChange={importeerData} className="hidden" />
               </label>
             </div>
+
+            {/* Geleerde combinatie-voorkeuren: zichtbaar én per stuk te wissen. */}
+            {zichtbareVoorkeuren.length > 0 && (
+              <div className="rounded-xl p-4 mb-6" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                <h3 className="font-medium mb-1 flex items-center gap-2" style={{ fontFamily: "Georgia, serif" }}>
+                  <ThumbsUp size={16} /> Wat de app van je feedback geleerd heeft
+                </h3>
+                <p className="text-xs mb-3" style={{ color: KLEUREN.grijs }}>
+                  Combinaties die je met de duimpjes beoordeeld hebt. Groen = vaker voorstellen, rood = liever niet.
+                  Klik het kruisje om een oordeel te vergeten.
+                </p>
+                <ul className="space-y-1.5">
+                  {zichtbareVoorkeuren.map(([sleutel, score]) => {
+                    const [a, b] = paarNamen(sleutel);
+                    const positief = score > 0;
+                    return (
+                      <li key={sleutel} className="flex items-center gap-2 text-sm rounded-lg px-3 py-2" style={{ background: KLEUREN.ivoor, border: `1px solid ${KLEUREN.lijn}` }}>
+                        {positief ? <ThumbsUp size={14} style={{ color: KLEUREN.groen }} className="shrink-0" /> : <ThumbsDown size={14} style={{ color: KLEUREN.bordeaux }} className="shrink-0" />}
+                        <span className="flex-1 min-w-0 truncate">{a} <span style={{ color: KLEUREN.grijs }}>+</span> {b}</span>
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: positief ? "#E8F0EA" : "#F9E9E4", color: positief ? KLEUREN.groen : KLEUREN.bordeaux }}>
+                          {positief ? "+" : ""}{score}
+                        </span>
+                        <button onClick={() => wisVoorkeur(sleutel)} title="Dit oordeel vergeten" className="shrink-0" style={{ color: KLEUREN.grijs }}>
+                          <X size={15} />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
 
             {beheerOpen && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
