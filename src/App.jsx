@@ -1,8 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Settings2, X, Download, Upload, Pencil, Plane, MapPin, AlertTriangle, PartyPopper, ShoppingBag, ThumbsUp, ThumbsDown, User } from "lucide-react";
-import { lazy, Suspense } from "react";
-const Mannequin3D = lazy(() => import("./Mannequin3D.jsx"));
-
+import { Shirt, Plus, Trash2, WashingMachine, RefreshCw, CloudRain, Sun, Cloud, Check, Sparkles, Settings2, X, Download, Upload, Pencil, Plane, MapPin, AlertTriangle, PartyPopper, ShoppingBag, ThumbsUp, ThumbsDown } from "lucide-react";
 // ---------- Constanten ----------
 const KLEUREN = {
   navy: "#1F2E4D",
@@ -777,9 +774,6 @@ export default function GarderobeApp() {
   // Geleerde combinatie-voorkeuren: { "idA|idB": score }. Positief = vaker,
   // negatief = minder vaak. Wordt bewaard en gesynchroniseerd als de rest.
   const [voorkeuren, setVoorkeuren] = useState({});
-  // 3D-weergave: { outfit, weer } van de outfit die je aan het bekijken bent,
-  // of null als de modal dicht is.
-  const [bekijk3D, setBekijk3D] = useState(null);
   const [geladen, setGeladen] = useState(false);
   const [beheerOpen, setBeheerOpen] = useState(false);
   const [nieuweKleur, setNieuweKleur] = useState({ label: "", hex: "#888888" });
@@ -1389,20 +1383,6 @@ export default function GarderobeApp() {
     });
   }
 
-  // Knop die de 3D-weergave opent voor een outfit + het bijbehorende weer
-  // (temp/regenkans). Bij een gelegenheid-outfit is er geen "weer van de dag"
-  // in het plan zelf, dus die geeft de aanroeper apart mee.
-  const Bekijk3DKnop = ({ outfit, weer: weerVoorDag }) => (
-    <button
-      onClick={() => setBekijk3D({ outfit, weer: weerVoorDag })}
-      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm"
-      style={{ border: `1.5px solid ${KLEUREN.lijn}`, color: KLEUREN.navy }}
-      title="Bekijk deze outfit op een 3D-personage"
-    >
-      <User size={14} /> Bekijk in 3D
-    </button>
-  );
-
   const OutfitFeedback = ({ outfit }) => {
     const stemming = outfitStemming(outfit);
     return (
@@ -1898,7 +1878,6 @@ export default function GarderobeApp() {
                             <RefreshCw size={14} /> Andere outfit
                           </button>
                         )}
-                        <Bekijk3DKnop outfit={dag.outfit} weer={{ temp: dag.temp, regenkans: dag.regenkans }} />
                       </div>
                       <OutfitFeedback outfit={dag.outfit} />
                     </div>
@@ -2046,15 +2025,9 @@ export default function GarderobeApp() {
                     ))}
                   </ul>
                   {gelegResultaat.gekozen.length > 0 && (
-                    <div className="flex items-center justify-between gap-2 mt-3 pt-3 flex-wrap" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs" style={{ color: KLEUREN.grijs }}>Bevalt deze combinatie?</span>
-                        <OutfitFeedback outfit={Object.fromEntries(gelegResultaat.gekozen.map((g) => [g.rol, g.item]))} />
-                      </div>
-                      <Bekijk3DKnop
-                        outfit={Object.fromEntries(gelegResultaat.gekozen.map((g) => [g.rol, g.item]))}
-                        weer={weer.find((w) => w.datum === vandaagISO()) || weer[0] || { temp: 18, regenkans: 0 }}
-                      />
+                    <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
+                      <span className="text-xs" style={{ color: KLEUREN.grijs }}>Bevalt deze combinatie?</span>
+                      <OutfitFeedback outfit={Object.fromEntries(gelegResultaat.gekozen.map((g) => [g.rol, g.item]))} />
                     </div>
                   )}
                 </div>
@@ -2270,7 +2243,6 @@ export default function GarderobeApp() {
                           >
                             <RefreshCw size={14} /> Andere outfit
                           </button>
-                          <Bekijk3DKnop outfit={dag.outfit} weer={{ temp: dag.temp, regenkans: dag.regenkans }} />
                         </div>
                       </div>
                     </article>
@@ -2855,53 +2827,6 @@ export default function GarderobeApp() {
           </section>
         )}
       </div>
-
-      {/* ---------- 3D-WEERGAVE (modal) ---------- */}
-      {bekijk3D && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: "rgba(31,46,77,0.55)" }}
-          onClick={() => setBekijk3D(null)}
-        >
-          <div
-            className="rounded-2xl overflow-hidden w-full max-w-md"
-            style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-4 py-3" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
-              <span className="flex items-center gap-2 font-medium" style={{ fontFamily: "Georgia, serif" }}>
-                <User size={17} /> Outfit in 3D
-              </span>
-              <button onClick={() => setBekijk3D(null)} style={{ color: KLEUREN.ivoor }} title="Sluiten">
-                <X size={20} />
-              </button>
-            </div>
-            <div style={{ height: 420, background: "#EDEDED" }}>
-              <Suspense
-                fallback={
-                  <div className="w-full h-full flex items-center justify-center text-sm" style={{ color: KLEUREN.grijs }}>
-                    3D-weergave laden…
-                  </div>
-                }
-              >
-                <Mannequin3D
-                  outfit={bekijk3D.outfit}
-                  weer={bekijk3D.weer}
-                  kleuren={kleuren}
-                  accessoireVorm={accessoireVorm}
-                />
-              </Suspense>
-            </div>
-            <div className="px-4 py-3 flex items-center justify-between text-xs" style={{ color: KLEUREN.grijs }}>
-              <span className="flex items-center gap-1.5">
-                <WeerIcoon regenkans={bekijk3D.weer?.regenkans ?? 0} temp={bekijk3D.weer?.temp ?? 18} />
-                {Math.round(bekijk3D.weer?.temp ?? 18)}° · {Math.round(bekijk3D.weer?.regenkans ?? 0)}% regen
-              </span>
-              <span>Sleep om te draaien</span>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
