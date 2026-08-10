@@ -974,13 +974,24 @@ export default function GarderobeApp() {
   }
 
   // Handmatig een enkel stuk op vies zetten (koffie gemorst) of juist terug
-  // op schoon (toch niet gedragen / tussendoor gewassen). Terug naar schoon
-  // reset ook de draagteller, alsof het net uit de was komt.
+  // op schoon (toch niet gedragen / tussendoor gewassen).
+  //
+  // Bij "op vies zetten" telt de draagbeurt nu gewoon mee, net als bij "Ik
+  // draag dit": een trui met ruimte voor 2 keer gaat van 0/2 naar 1/2, en pas
+  // bij het bereiken van de limiet (2/2) wordt hij echt vies. Zo klopt de
+  // teller ook als je 'm handmatig markeert i.p.v. via de planner.
+  //
+  // "Terug naar schoon" reset de teller wél helemaal naar 0, alsof het stuk
+  // net gewassen is — dat blijft een bewuste volledige reset.
   function wisselVies(id) {
     setItems((prev) =>
       prev.map((it) => {
         if (it.id !== id) return it;
-        return it.vies ? { ...it, vies: false, draagTeller: 0 } : { ...it, vies: true };
+        if (it.vies) {
+          return { ...it, vies: false, draagTeller: 0 };
+        }
+        const teller = (it.draagTeller || 0) + 1;
+        return { ...it, draagTeller: teller, vies: teller >= (it.maxDraag || 1) };
       })
     );
   }
@@ -1014,8 +1025,17 @@ export default function GarderobeApp() {
     return som / paren.length;
   }
 
+  // "De was is gedaan" maakt alles schoon — behalve wat je vandaag aan hebt.
+  // Die kleren zitten nog aan je lijf, niet in de wasmand, ook al draai je nu
+  // een wasje. Ze blijven dus in hun huidige staat (schoon met hun teller, of
+  // eventueel al vies als de limiet vandaag bereikt is) en worden gewoon pas
+  // meegenomen bij de vólgende keer dat je op deze knop drukt.
   function wasAlles() {
-    setItems((prev) => prev.map((it) => ({ ...it, vies: false, draagTeller: 0 })));
+    const vandaagPlan = plan.find((d) => d.datum === vandaagISO());
+    const aanIds = new Set(
+      vandaagPlan ? Object.values(vandaagPlan.outfit).flat().filter(Boolean).map((it) => it.id) : []
+    );
+    setItems((prev) => prev.map((it) => (aanIds.has(it.id) ? it : { ...it, vies: false, draagTeller: 0 })));
   }
 
   function weerAfwijking(dag) {
@@ -1657,7 +1677,7 @@ export default function GarderobeApp() {
             onClick={wasAlles}
             className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-transform active:scale-95"
             style={{ background: KLEUREN.groen, color: KLEUREN.ivoor }}
-            title="Markeer alles als schoon"
+            title="Markeer alles als schoon — behalve wat je vandaag volgens de planner aan hebt"
           >
             <WashingMachine size={18} />
             De was is gedaan{aantalVies > 0 ? ` (${aantalVies} vies)` : ""}
@@ -2672,7 +2692,13 @@ export default function GarderobeApp() {
                               color: it.vies ? KLEUREN.bordeaux : KLEUREN.groen,
                               border: `1px solid ${it.vies ? "#EBCDC4" : "#CFE0D3"}`,
                             }}
-                            title={it.vies ? "Klik om terug op schoon te zetten" : "Klik om op vies te zetten"}
+                            title={
+                              it.vies
+                                ? "Klik om terug op schoon te zetten"
+                                : (it.draagTeller || 0) + 1 >= (it.maxDraag || 1)
+                                ? "Klik om als gedragen te tellen — dit was de laatste keer, wordt vies"
+                                : `Klik om als gedragen te tellen (${(it.draagTeller || 0) + 1}/${it.maxDraag})`
+                            }
                           >
                             {it.vies ? "vies" : `schoon ${it.draagTeller || 0}/${it.maxDraag}`}
                           </button>
