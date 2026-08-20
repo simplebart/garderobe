@@ -612,6 +612,33 @@ const GELEGENHEDEN = [
   },
 ];
 
+// ---------- Chat: trefwoord-matcher voor gelegenheden ----------
+// Geen AI — gewoon een lijst met woorden per gelegenheid. Typ je "ik ga naar
+// een trouwerij", dan matcht "trouwerij" op de synoniemenlijst van bruiloft.
+// Herkent hij niets, dan wordt je eigen tekst als vrije gelegenheid gebruikt
+// (net als het intikken bij "iets anders" hiervoor deed).
+const GELEGENHEID_SYNONIEMEN = {
+  restaurant: ["eten", "diner", "etentje", "uit eten"],
+  bioscoop: ["film", "cinema", "movie"],
+  date: ["afspraakje", "afspraak", "daten"],
+  borrel: ["feest", "feestje", "verjaardag", "party", "housewarming"],
+  sollicitatie: ["werk", "interview", "gesprek", "baan", "stage"],
+  bruiloft: ["trouwerij", "huwelijk", "trouwen", "getrouwd"],
+  gala: ["smoking", "black tie", "galafeest"],
+  begrafenis: ["uitvaart", "condoleance", "rouw", "afscheid"],
+};
+
+function vindGelegenheid(tekst) {
+  const t = (tekst || "").toLowerCase();
+  const directe = GELEGENHEDEN.find((g) => t.includes(g.label.toLowerCase()));
+  if (directe) return directe;
+  for (const g of GELEGENHEDEN) {
+    const syn = GELEGENHEID_SYNONIEMEN[g.id] || [];
+    if (syn.some((w) => t.includes(w))) return g;
+  }
+  return null;
+}
+
 // Stelt een gelegenheids-outfit samen: per vereiste rol het best passende stuk
 // dat schoon (of vies-met-waslabel) in de kast zit. Ontbreekt er iets, dan komt
 // die rol op de "nog kopen"-lijst. Retourneert de gekozen stukken plus de gaten.
@@ -766,11 +793,12 @@ export default function GarderobeApp() {
   const [reisLaadt, setReisLaadt] = useState(false);
   const [reisFout, setReisFout] = useState("");
   const [reisResultaat, setReisResultaat] = useState(null); // { plaatsnaam, dagen, paklijst, tekorten }
-  // Gelegenheid-modus
-  const [gelegKeuze, setGelegKeuze] = useState(null); // gekozen gelegenheid-id of "eigen"
-  const [gelegEigen, setGelegEigen] = useState("");
-  const [gelegResultaat, setGelegResultaat] = useState(null);
-  const [gelegAnimatie, setGelegAnimatie] = useState(false);
+  // Gelegenheid-modus: een chatgesprek. Geen AI — een trefwoordherkenner
+  // (vindGelegenheid) plus de bestaande dresscode-logica. chatLog is de
+  // volledige geschiedenis; chatInvoer het tekstveld.
+  const CHAT_WELKOM = "Voor welke gelegenheid zoek je een outfit? Typ het (bijv. \"ik ga naar een bruiloft\"), of kies hieronder een knop.";
+  const [chatLog, setChatLog] = useState(() => [{ id: "start", from: "bot", kind: "text", text: CHAT_WELKOM }]);
+  const [chatInvoer, setChatInvoer] = useState("");
   // Geleerde combinatie-voorkeuren: { "idA|idB": score }. Positief = vaker,
   // negatief = minder vaak. Wordt bewaard en gesynchroniseerd als de rest.
   const [voorkeuren, setVoorkeuren] = useState({});
@@ -917,27 +945,11 @@ export default function GarderobeApp() {
     setReisLaadt(false);
   }
 
-  function kiesGelegenheid(gelegenheid) {
-    setGelegKeuze(gelegenheid.id);
-    setGelegAnimatie(true);
-    setGelegResultaat(null);
-    // Korte onthullende animatie voordat het resultaat verschijnt.
-    setTimeout(() => {
-      // Weer van vandaag meegeven zodat de gelegenheid-outfit met kou/regen
-      // rekening houdt (jas bij winter/regen, geen dikke jas bij hitte).
-      const weerVandaag = weer.find((w) => w.datum === vandaagISO()) || weer[0] || null;
-      const res = genereerGelegenheid(items, gelegenheid, voorkeuren, weerVandaag);
-      setGelegResultaat({ gelegenheid, ...res });
-      setGelegAnimatie(false);
-    }, 1100);
-  }
-
-  function kiesEigenGelegenheid() {
-    const naam = gelegEigen.trim();
-    if (!naam) return;
-    // Vrije invoer: geen harde dresscode, gebruik de gekozen stijl en vraag om
-    // de basisonderdelen. Geen koopadvies, want we weten de eisen niet.
-    const gelegenheid = {
+  // Bouwt een "eigen" gelegenheid voor tekst die niet herkend wordt: geen
+  // harde dresscode, gebruikt de gekozen stijl en vraagt om de basisonderdelen.
+  // Geen koopadvies, want de eisen zijn dan niet bekend.
+  function eigenGelegenheid(naam) {
+    return {
       id: "eigen", label: naam, emoji: "✨", stijlen: [stijl],
       vereist: [
         { rol: "basislaag", omschrijving: "bovenstuk", filter: (it) => it.categorie === "top" && (it.laag || "basis") === "basis" },
@@ -945,7 +957,51 @@ export default function GarderobeApp() {
         { rol: "schoenen", omschrijving: "schoenen", filter: (it) => it.categorie === "schoenen" },
       ],
     };
-    kiesGelegenheid(gelegenheid);
+  }
+
+  // Verstuurt een chatbericht: voegt het als user-bericht toe, herkent de
+  // gelegenheid via trefwoorden (of maakt er een vrije van), toont kort een
+  // "typt..."-indicator, en voegt dan het outfit-antwoord toe.
+  function stuurChatBericht(tekstInvoer) {
+    const tekst = (tekstInvoer ?? chatInvoer).trim();
+    if (!tekst) return;
+    setChatLog((prev) => [...prev, { id: nieuwId(), from: "user", kind: "text", text: tekst }]);
+    setChatInvoer("");
+
+    if (!items.length) {
+      setChatLog((prev) => [...prev, { id: nieuwId(), from: "bot", kind: "leeg" }]);
+      return;
+    }
+
+    const typingId = nieuwId();
+    setChatLog((prev) => [...prev, { id: typingId, from: "bot", kind: "typing" }]);
+
+    setTimeout(() => {
+      const gevonden = vindGelegenheid(tekst);
+      const gelegenheid = gevonden || eigenGelegenheid(tekst);
+      const weerVandaag = weer.find((w) => w.datum === vandaagISO()) || weer[0] || null;
+      const resultaat = genereerGelegenheid(items, gelegenheid, voorkeuren, weerVandaag);
+      setChatLog((prev) => [
+        ...prev.filter((m) => m.id !== typingId),
+        { id: nieuwId(), from: "bot", kind: "outfit", gelegenheid, resultaat },
+      ]);
+    }, 700);
+  }
+
+  // Genereert een nieuwe outfit voor dezelfde gelegenheid, binnen hetzelfde
+  // chatbericht (de "andere outfit"-knop bij een eerder antwoord).
+  function chatAndereOutfit(berichtId) {
+    setChatLog((prev) => {
+      const bericht = prev.find((m) => m.id === berichtId);
+      if (!bericht) return prev;
+      const weerVandaag = weer.find((w) => w.datum === vandaagISO()) || weer[0] || null;
+      const resultaat = genereerGelegenheid(items, bericht.gelegenheid, voorkeuren, weerVandaag);
+      return prev.map((m) => (m.id === berichtId ? { ...m, resultaat } : m));
+    });
+  }
+
+  function nieuwGesprek() {
+    setChatLog([{ id: nieuwId(), from: "bot", kind: "text", text: CHAT_WELKOM }]);
   }
 
   function maakPlan() {
@@ -1909,181 +1965,196 @@ export default function GarderobeApp() {
           </section>
         )}
 
-        {/* ---------- GELEGENHEID ---------- */}
+        {/* ---------- GELEGENHEID (chat) ---------- */}
         {tab === "gelegenheid" && (
           <section>
-            <div className="rounded-xl p-4 mb-5" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
-              <h2 className="font-medium mb-1 flex items-center gap-2" style={{ fontFamily: "Georgia, serif" }}>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-medium flex items-center gap-2" style={{ fontFamily: "Georgia, serif" }}>
                 <PartyPopper size={18} /> Wat trek ik aan voor…
               </h2>
-              <p className="text-xs mb-3" style={{ color: KLEUREN.grijs }}>
-                Kies een gelegenheid. De app stelt een passende outfit samen uit je kast — en laat zien
-                wat je nog mist voor de nettere gelegenheden.
-              </p>
-
-              <p className="uppercase text-xs tracking-widest mb-1.5" style={{ color: KLEUREN.bordeaux, letterSpacing: "0.12em" }}>Uitgaan</p>
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {GELEGENHEDEN.filter((g) => g.categorie === "uitgaan").map((g) => (
-                  <button
-                    key={g.id}
-                    onClick={() => kiesGelegenheid(g)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"
-                    style={{
-                      background: gelegKeuze === g.id ? KLEUREN.navy : KLEUREN.ivoor,
-                      color: gelegKeuze === g.id ? KLEUREN.ivoor : KLEUREN.navy,
-                      border: `1.5px solid ${gelegKeuze === g.id ? KLEUREN.navy : KLEUREN.lijn}`,
-                    }}
-                  >
-                    <span>{g.emoji}</span> {g.label}
-                  </button>
-                ))}
-              </div>
-
-              <p className="uppercase text-xs tracking-widest mb-1.5" style={{ color: KLEUREN.bordeaux, letterSpacing: "0.12em" }}>Formeel</p>
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {GELEGENHEDEN.filter((g) => g.categorie === "formeel").map((g) => (
-                  <button
-                    key={g.id}
-                    onClick={() => kiesGelegenheid(g)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"
-                    style={{
-                      background: gelegKeuze === g.id ? KLEUREN.navy : KLEUREN.ivoor,
-                      color: gelegKeuze === g.id ? KLEUREN.ivoor : KLEUREN.navy,
-                      border: `1.5px solid ${gelegKeuze === g.id ? KLEUREN.navy : KLEUREN.lijn}`,
-                    }}
-                  >
-                    <span>{g.emoji}</span> {g.label}
-                  </button>
-                ))}
-              </div>
-
-              <p className="uppercase text-xs tracking-widest mb-1.5" style={{ color: KLEUREN.bordeaux, letterSpacing: "0.12em" }}>Iets anders</p>
-              <div className="flex flex-wrap gap-2">
-                <input
-                  value={gelegEigen}
-                  onChange={(e) => setGelegEigen(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && kiesEigenGelegenheid()}
-                  placeholder="Typ een eigen gelegenheid, bijv. Concert"
-                  className="flex-1 min-w-48 px-3 py-2 rounded-lg text-sm"
-                  style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
-                />
+              {chatLog.length > 1 && (
                 <button
-                  onClick={kiesEigenGelegenheid}
-                  disabled={!gelegEigen.trim() || !items.length}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
-                  style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}
+                  onClick={nieuwGesprek}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+                  style={{ border: `1.5px solid ${KLEUREN.lijn}`, color: KLEUREN.grijs }}
                 >
-                  <Sparkles size={16} /> Stel voor
+                  <X size={13} /> Nieuw gesprek
                 </button>
-              </div>
-              {!items.length && (
-                <p className="text-xs mt-3" style={{ color: KLEUREN.bordeaux }}>Je kast is nog leeg — voeg eerst kledingstukken toe.</p>
               )}
             </div>
+            <p className="text-xs mb-4" style={{ color: KLEUREN.grijs }}>
+              Typ een gelegenheid of kies een knop. Geen AI — gewoon een trefwoordherkenner die dezelfde
+              dresscode-logica gebruikt als altijd, en laat zien wat je nog mist voor de nettere gelegenheden.
+            </p>
 
-            {/* Onthullende animatie */}
-            {gelegAnimatie && (
-              <div className="rounded-xl p-10 mb-5 flex flex-col items-center justify-center gap-3" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
-                <div style={{ animation: "gTol 1s ease-in-out infinite" }}>
-                  <Sparkles size={40} style={{ color: KLEUREN.goud }} />
-                </div>
-                <p className="text-sm" style={{ color: KLEUREN.grijs }}>Een passende outfit samenstellen…</p>
-                <style>{`@keyframes gTol { 0%,100% { transform: translateY(0) rotate(-8deg); opacity:.7 } 50% { transform: translateY(-8px) rotate(8deg); opacity:1 } }`}</style>
-              </div>
-            )}
-
-            {/* Resultaat */}
-            {gelegResultaat && !gelegAnimatie && (
-              <div style={{ animation: "gIn .5s ease-out" }}>
-                <style>{`@keyframes gIn { from { opacity:0; transform: translateY(10px) } to { opacity:1; transform:none } }`}</style>
-                <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-                  <h3 className="text-lg flex items-center gap-2" style={{ fontFamily: "Georgia, serif" }}>
-                    <span>{gelegResultaat.gelegenheid.emoji}</span> Outfit voor {gelegResultaat.gelegenheid.label}
-                  </h3>
-                  <button
-                    onClick={() => { setGelegResultaat(null); setGelegKeuze(null); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm shrink-0"
-                    style={{ border: `1.5px solid ${KLEUREN.lijn}`, color: KLEUREN.grijs }}
-                  >
-                    <X size={14} /> Sluiten
-                  </button>
-                </div>
-
-                {gelegResultaat.ontbreekt.some((e) => ["basislaag", "broek", "schoenen"].includes(e.rol)) && (
-                  <div className="flex items-start gap-2 rounded-lg px-3 py-2 mb-4 text-sm" style={{ background: "#F9E9E4", color: KLEUREN.bordeaux }}>
-                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                    <span>Deze outfit is nog niet compleet voor {gelegResultaat.gelegenheid.label.toLowerCase()} — je kast mist een of meer passende, nette basisstukken. Zie het koopadvies onderaan.</span>
-                  </div>
-                )}
-
-                {gelegResultaat.gekozen.some((g) => g.moetWassen) && (
-                  <div className="flex items-start gap-2 rounded-lg px-3 py-2 mb-4 text-sm" style={{ background: "#FBF3DC", color: KLEUREN.navy, border: `1px solid ${KLEUREN.goud}` }}>
-                    <WashingMachine size={16} className="mt-0.5 shrink-0" />
-                    <span>Een of meer voorgestelde stukken zijn nu nog vies — was ze op tijd (ze staan gemarkeerd).</span>
-                  </div>
-                )}
-
-                {/* Gekozen stukken */}
-                <div className="rounded-xl p-4 mb-5" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
-                  <ul className="space-y-2">
-                    {gelegResultaat.gekozen.map((g) => (
-                      <li key={g.rol} className="flex items-center gap-3 text-sm">
-                        <span className="w-20 shrink-0 uppercase text-xs tracking-wide capitalize" style={{ color: KLEUREN.grijs }}>{g.rol}</span>
-                        <span className="flex items-center gap-3 min-w-0 flex-1">
-                          <ItemBeeld item={g.item} grootte={44} />
-                          <span className="min-w-0">
-                            <span className="block truncate">{g.item.merk ? `${g.item.merk} — ` : ""}{g.item.naam}</span>
-                            <span className="block text-xs" style={{ color: KLEUREN.grijs }}>{kleurenTekst(g.item)}</span>
-                          </span>
-                        </span>
-                        {g.moetWassen && (
-                          <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: "#FBF3DC", color: KLEUREN.bordeaux, border: `1px solid ${KLEUREN.goud}` }}>
-                            <WashingMachine size={12} /> nog wassen
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                  {gelegResultaat.gekozen.length > 0 && (
-                    <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: `1px dashed ${KLEUREN.lijn}` }}>
-                      <span className="text-xs" style={{ color: KLEUREN.grijs }}>Bevalt deze combinatie?</span>
-                      <OutfitFeedback outfit={Object.fromEntries(gelegResultaat.gekozen.map((g) => [g.rol, g.item]))} />
+            {/* Chatgeschiedenis */}
+            <div className="rounded-xl p-4 mb-3 space-y-3" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}`, minHeight: 120 }}>
+              {chatLog.map((bericht) => {
+                if (bericht.from === "user") {
+                  return (
+                    <div key={bericht.id} className="flex justify-end">
+                      <div className="max-w-[80%] rounded-2xl rounded-tr-sm px-3.5 py-2 text-sm" style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}>
+                        {bericht.text}
+                      </div>
                     </div>
-                  )}
-                </div>
+                  );
+                }
+                if (bericht.kind === "typing") {
+                  return (
+                    <div key={bericht.id} className="flex justify-start">
+                      <div className="rounded-2xl rounded-tl-sm px-3.5 py-2.5 flex items-center gap-1" style={{ background: KLEUREN.ivoor, border: `1px solid ${KLEUREN.lijn}` }}>
+                        {[0, 1, 2].map((i) => (
+                          <span
+                            key={i}
+                            className="w-1.5 h-1.5 rounded-full"
+                            style={{ background: KLEUREN.grijs, animation: `chatStip 1s ${i * 0.15}s infinite ease-in-out` }}
+                          />
+                        ))}
+                        <style>{`@keyframes chatStip { 0%,60%,100% { opacity:.3; transform:translateY(0) } 30% { opacity:1; transform:translateY(-2px) } }`}</style>
+                      </div>
+                    </div>
+                  );
+                }
+                if (bericht.kind === "leeg") {
+                  return (
+                    <div key={bericht.id} className="flex justify-start">
+                      <div className="max-w-[85%] rounded-2xl rounded-tl-sm px-3.5 py-2 text-sm" style={{ background: "#F9E9E4", color: KLEUREN.bordeaux, border: "1px solid #EBCDC4" }}>
+                        Je kast is nog leeg — voeg eerst een paar kledingstukken toe in de Kledingkast-tab, dan kan ik iets voorstellen.
+                      </div>
+                    </div>
+                  );
+                }
+                if (bericht.kind === "outfit") {
+                  const { gelegenheid, resultaat } = bericht;
+                  const incompleet = resultaat.ontbreekt.some((e) => ["basislaag", "broek", "schoenen"].includes(e.rol));
+                  return (
+                    <div key={bericht.id} className="flex justify-start">
+                      <div className="max-w-[92%] w-full rounded-2xl rounded-tl-sm p-3.5" style={{ background: KLEUREN.ivoor, border: `1px solid ${KLEUREN.lijn}` }}>
+                        <p className="text-sm mb-3">
+                          <span>{gelegenheid.emoji}</span> Dit zou ik aanraden voor <strong>{gelegenheid.label.toLowerCase()}</strong>:
+                        </p>
 
-                {/* Nog kopen */}
-                {gelegResultaat.ontbreekt.length > 0 && (
-                  <div className="rounded-xl p-4" style={{ background: "#FDF6F4", border: `1px solid #EBCDC4` }}>
-                    <h4 className="font-medium mb-2 flex items-center gap-2" style={{ fontFamily: "Georgia, serif", color: KLEUREN.bordeaux }}>
-                      <ShoppingBag size={17} /> Hiervoor zou ik nog aanschaffen
-                    </h4>
-                    <ul className="space-y-2">
-                      {gelegResultaat.ontbreekt.map((eis) => (
-                        <li key={eis.rol} className="text-sm">
-                          <div className="flex items-baseline gap-2">
-                            <span className="w-20 shrink-0 uppercase text-xs tracking-wide capitalize" style={{ color: KLEUREN.grijs }}>{eis.rol}</span>
-                            <span className="font-medium">{eis.omschrijving}</span>
+                        {incompleet && (
+                          <div className="flex items-start gap-2 rounded-lg px-3 py-2 mb-3 text-sm" style={{ background: "#F9E9E4", color: KLEUREN.bordeaux }}>
+                            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                            <span>Deze outfit is nog niet compleet — je kast mist passende, nette basisstukken. Zie het advies onderaan.</span>
                           </div>
-                          {eis.hebIetsMaarTeInformeel && eis.dichtstbij && (
-                            <p className="text-xs mt-0.5 ml-[5.5rem]" style={{ color: KLEUREN.bordeaux }}>
-                              Je hebt wel "{eis.dichtstbij.merk ? `${eis.dichtstbij.merk} — ` : ""}{eis.dichtstbij.naam}", maar dat is te casual voor deze gelegenheid.
+                        )}
+                        {resultaat.gekozen.some((g) => g.moetWassen) && (
+                          <div className="flex items-start gap-2 rounded-lg px-3 py-2 mb-3 text-sm" style={{ background: "#FBF3DC", color: KLEUREN.navy, border: `1px solid ${KLEUREN.goud}` }}>
+                            <WashingMachine size={15} className="mt-0.5 shrink-0" />
+                            <span>Een of meer stukken zijn nu nog vies — was ze op tijd.</span>
+                          </div>
+                        )}
+
+                        {resultaat.gekozen.length > 0 && (
+                          <div className="rounded-lg p-3 mb-3" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
+                            <ul className="space-y-2">
+                              {resultaat.gekozen.map((g) => (
+                                <li key={g.rol} className="flex items-center gap-3 text-sm">
+                                  <span className="w-20 shrink-0 uppercase text-xs tracking-wide capitalize" style={{ color: KLEUREN.grijs }}>{g.rol}</span>
+                                  <span className="flex items-center gap-3 min-w-0 flex-1">
+                                    <ItemBeeld item={g.item} grootte={40} />
+                                    <span className="min-w-0">
+                                      <span className="block truncate">{g.item.merk ? `${g.item.merk} — ` : ""}{g.item.naam}</span>
+                                      <span className="block text-xs" style={{ color: KLEUREN.grijs }}>{kleurenTekst(g.item)}</span>
+                                    </span>
+                                  </span>
+                                  {g.moetWassen && (
+                                    <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full shrink-0" style={{ background: "#FBF3DC", color: KLEUREN.bordeaux, border: `1px solid ${KLEUREN.goud}` }}>
+                                      <WashingMachine size={11} /> wassen
+                                    </span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {resultaat.ontbreekt.length > 0 && (
+                          <div className="rounded-lg p-3 mb-3" style={{ background: "#FDF6F4", border: `1px solid #EBCDC4` }}>
+                            <p className="text-xs font-medium mb-1.5 flex items-center gap-1.5" style={{ color: KLEUREN.bordeaux }}>
+                              <ShoppingBag size={14} /> Hiervoor zou ik nog aanschaffen
                             </p>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="text-xs mt-3" style={{ color: KLEUREN.grijs }}>
-                      Voor deze gelegenheid mist je kast passende, nette stukken. Schaf ze aan en voeg ze toe — dan stelt de app er meteen een complete outfit mee samen.
-                    </p>
+                            <ul className="space-y-1">
+                              {resultaat.ontbreekt.map((eis) => (
+                                <li key={eis.rol} className="text-xs">
+                                  <span className="uppercase tracking-wide capitalize" style={{ color: KLEUREN.grijs }}>{eis.rol}:</span>{" "}
+                                  <span>{eis.omschrijving}</span>
+                                  {eis.hebIetsMaarTeInformeel && eis.dichtstbij && (
+                                    <span style={{ color: KLEUREN.bordeaux }}> (je "{eis.dichtstbij.naam}" is te casual hiervoor)</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs" style={{ color: KLEUREN.grijs }}>Bevalt dit?</span>
+                            <OutfitFeedback outfit={Object.fromEntries(resultaat.gekozen.map((g) => [g.rol, g.item]))} />
+                          </div>
+                          <button
+                            onClick={() => chatAndereOutfit(bericht.id)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+                            style={{ border: `1.5px solid ${KLEUREN.lijn}`, color: KLEUREN.navy }}
+                          >
+                            <RefreshCw size={12} /> Iets anders
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                // Gewone bot-tekst
+                return (
+                  <div key={bericht.id} className="flex justify-start">
+                    <div className="max-w-[85%] rounded-2xl rounded-tl-sm px-3.5 py-2 text-sm" style={{ background: KLEUREN.ivoor, border: `1px solid ${KLEUREN.lijn}` }}>
+                      {bericht.text}
+                    </div>
                   </div>
-                )}
-              </div>
-            )}
+                );
+              })}
+            </div>
+
+            {/* Snelkeuzeknoppen — altijd beschikbaar, naast vrij typen */}
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {GELEGENHEDEN.map((g) => (
+                <button
+                  key={g.id}
+                  onClick={() => stuurChatBericht(g.label)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm"
+                  style={{ background: KLEUREN.wit, color: KLEUREN.navy, border: `1.5px solid ${KLEUREN.lijn}` }}
+                >
+                  <span>{g.emoji}</span> {g.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Invoerveld */}
+            <div className="flex gap-2">
+              <input
+                value={chatInvoer}
+                onChange={(e) => setChatInvoer(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && stuurChatBericht()}
+                placeholder="Typ hier, bijv. 'ik ga naar een concert'…"
+                className="flex-1 min-w-0 px-3 py-2 rounded-lg text-sm"
+                style={{ border: `1.5px solid ${KLEUREN.lijn}` }}
+              />
+              <button
+                onClick={() => stuurChatBericht()}
+                disabled={!chatInvoer.trim()}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-40"
+                style={{ background: KLEUREN.navy, color: KLEUREN.ivoor }}
+              >
+                <Sparkles size={16} /> Stuur
+              </button>
+            </div>
           </section>
         )}
 
-        {/* ---------- VAKANTIE ---------- */}
+                {/* ---------- VAKANTIE ---------- */}
         {tab === "vakantie" && (
           <section>
             <div className="rounded-xl p-4 mb-5" style={{ background: KLEUREN.wit, border: `1px solid ${KLEUREN.lijn}` }}>
