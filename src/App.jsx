@@ -235,6 +235,12 @@ function normaliseerItem(it) {
   if (!Array.isArray(basis.seizoenen) || !basis.seizoenen.length) {
     basis.seizoenen = afleidSeizoenen(basis);
   }
+  // Oudere items hadden geen regenOk (of alleen schoenen kregen het expliciet
+  // mee) — hier krijgt elk stuk zonder deze waarde een gok op basis van de
+  // naam, net als bij seizoenen. Al expliciet gezet? Dan blijft dat gewoon staan.
+  if (typeof basis.regenOk !== "boolean") {
+    basis.regenOk = afleidRegenOk(basis.naam);
+  }
   return basis;
 }
 
@@ -249,12 +255,28 @@ const ACCESSOIRE_TREFWOORDEN = [
   { vorm: "zonnebril", woorden: ["zonnebril", "bril"] },
   { vorm: "handschoen", woorden: ["handschoen", "want"] },
   { vorm: "das", woorden: ["stropdas", "vlinderdas", "das"] },
+  { vorm: "paraplu", woorden: ["paraplu", "umbrella"] },
   { vorm: "horloge", woorden: ["horloge", "watch"] },
 ];
 const accessoireVorm = (naam) => {
   const n = (naam || "").toLowerCase();
   const treffer = ACCESSOIRE_TREFWOORDEN.find((t) => t.woorden.some((w) => n.includes(w)));
   return treffer ? treffer.vorm : "horloge";
+};
+
+// ---------- Regenbestendigheid ----------
+// Bij het toevoegen van een kledingstuk wordt op naam gegokt of het tegen
+// regen kan: expliciet waterdichte stukken worden "ja", kwetsbare stoffen
+// (suède, linnen, canvas) worden "nee". Alles daartussenin blijft "ja" — de
+// meeste kleding kan gewoon tegen een buitje. Dit is alleen een startpunt:
+// je kunt het per stuk altijd zelf overrulen via het formulier of het potlood.
+const REGEN_GESCHIKT_WOORDEN = ["regenjas", "waterdicht", "gore-tex", "goretex", "rubber", "regenbestendig"];
+const REGEN_ONGESCHIKT_WOORDEN = ["suède", "suede", "linnen", "canvas", "wildleer"];
+const afleidRegenOk = (naam) => {
+  const n = (naam || "").toLowerCase();
+  if (REGEN_GESCHIKT_WOORDEN.some((w) => n.includes(w))) return true;
+  if (REGEN_ONGESCHIKT_WOORDEN.some((w) => n.includes(w))) return false;
+  return true;
 };
 
 // ---------- Stijlregels ----------
@@ -304,7 +326,10 @@ function voorkeurScore(kandidaatId, gekozenIds, voorkeuren) {
 
 function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = new Map(), voorkeuren = {}) {
   const dagBand = bandVanTemp(dag.temp);
-  const regent = dag.regenkans >= 50;
+  // Regen-gradatie i.p.v. één harde knip bij 50%: vanaf een matige kans
+  // (30%+) krijgen regenbestendige schoenen én jassen al een voorkeur (met
+  // terugval als er niets anders is), in plaats van pas bij een harde 50%.
+  const regenSpeeltMee = dag.regenkans >= 30;
   const vandaag = new Set();
 
   const dagBandIndex = TEMP_BANDEN.findIndex((b) => b.id === dagBand);
@@ -343,7 +368,16 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
       kern,
     ];
     for (const laag of lagen) {
-      const pool = regent && categorie === "schoenen" ? laag.filter((it) => it.regenOk !== false) : laag;
+      // Regen telt nu mee voor zowel schoenen als jas, en al vanaf een
+      // matige kans (30%+) — niet pas bij een harde knip van 50%. Het is een
+      // voorkeur mét terugval: is er niets regenbestendigs, dan liever toch
+      // iets aan dan een lege categorie.
+      const regenRelevant = ["schoenen", "jas", "broek", "top"].includes(categorie);
+      let pool = laag;
+      if (regenRelevant && regenSpeeltMee) {
+        const regenbestendig = laag.filter((it) => it.regenOk !== false);
+        pool = regenbestendig.length ? regenbestendig : laag;
+      }
       const bruikbaar = pool.length ? pool : laag;
       if (bruikbaar.length) {
         // Kies het stuk dat het minst vaak in dit plan is voorgekomen, zodat
@@ -381,7 +415,10 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
       ? kiesMetVoorkeur(
           "top",
           (it) => it.laag === "over",
-          (it) => !kleurenBotsen(it.kleuren, basislaag?.kleuren) && !(it.patroon && basislaag?.patroon)
+          (it) =>
+            !kleurenBotsen(it.kleuren, basislaag?.kleuren) &&
+            !(it.patroon && basislaag?.patroon) &&
+            !(regenSpeeltMee && it.regenOk === false)
         )
       : undefined;
 
@@ -392,21 +429,34 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
   const broek = kiesMetVoorkeur(
     "broek",
     (it) => pasvormOk(bovenRuim, it),
-    (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) && !(it.patroon && patronenBoven >= 1),
+    (it) =>
+      !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) &&
+      !(it.patroon && patronenBoven >= 1) &&
+      !(regenSpeeltMee && it.regenOk === false),
     true
   );
 
+  // Een jas komt erbij bij kou, óf bij een reële kans op regen — dat laatste
+  // hoefde voorheen pas bij 50%+, terwijl je op een milde dag met 40% kans
+  // ook al een lichte laag tegen een bui wilt. Wélke jas gekozen wordt, houdt
+  // hierboven (in kies()) al rekening met regenbestendigheid.
   const jas =
-    dag.temp < 15 || regent
-      ? kiesMetVoorkeur("jas", () => true, (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren))
+    dag.temp < 15 || dag.regenkans >= 40
+      ? kiesMetVoorkeur(
+          "jas",
+          () => true,
+          (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) && !(regenSpeeltMee && it.regenOk === false)
+        )
       : undefined;
 
   // Accessoires: meerdere per outfit, maar hooguit één per soort — wel een
   // riem én een pet én een horloge, maar nooit twee riemen. Het weer filtert
   // vanzelf mee via de temperatuurbanden (geen wollen sjaal bij 25 graden).
+  // Een paraplu is een uitzondering: die hoort niet standaard mee zoals een
+  // riem, maar alleen als er een reële kans op regen is.
   const accessoireSoorten = [...new Set(
     items.filter((it) => it.categorie === "accessoire").map((it) => accessoireVorm(it.naam))
-  )];
+  )].filter((soort) => soort !== "paraplu" || regenSpeeltMee);
   const accessoires = accessoireSoorten
     .map((soort) => kies("accessoire", (it) => accessoireVorm(it.naam) === soort))
     .filter(Boolean);
@@ -653,13 +703,25 @@ function genereerGelegenheid(items, gelegenheid, voorkeuren = {}, weerVandaag = 
   // ook bij een nette gelegenheid. Warm (>= 22 gr) -> een dikke jas wordt juist
   // ontmoedigd. Regen -> waterbestendige schoenen krijgen voorrang.
   const temp = weerVandaag?.temp;
-  const regent = (weerVandaag?.regenkans ?? 0) >= 50;
+  const regenkans = weerVandaag?.regenkans ?? 0;
   const koud = typeof temp === "number" && temp < 14;
   const warm = typeof temp === "number" && temp >= 22;
   // Bij koud weer een jas afdwingen ook als de gelegenheid er niet om vroeg.
   const eisenBasis = [...gelegenheid.vereist];
   if (koud && !eisenBasis.some((e) => e.rol === "jas")) {
     eisenBasis.push({ rol: "jas", omschrijving: "warme (nette) jas of laag — het is koud", filter: (it) => it.categorie === "jas", weerExtra: true });
+  }
+  // Bij een flinke regenkans een paraplu voorstellen als je die bezit — puur
+  // een suggestie (geen "nog kopen"-eis: niet iedereen hoeft er een te hebben).
+  // Eigen rol "paraplu" i.p.v. "accessoire", zodat het nooit botst met een
+  // eventuele bestaande accessoire-eis zoals een stropdas.
+  if (regenkans >= 50 && items.some((it) => it.categorie === "accessoire" && accessoireVorm(it.naam) === "paraplu")) {
+    eisenBasis.push({
+      rol: "paraplu",
+      omschrijving: "paraplu — kans op regen",
+      filter: (it) => it.categorie === "accessoire" && accessoireVorm(it.naam) === "paraplu",
+      weerExtra: true,
+    });
   }
 
   // De outfit wordt nu stuk-voor-stuk opgebouwd MET de combinatie-regels van de
@@ -711,8 +773,12 @@ function genereerGelegenheid(items, gelegenheid, voorkeuren = {}, weerVandaag = 
         // Stuk dat bij de temperatuur past krijgt een klein duwtje; een stuk dat
         // er duidelijk naast zit (bijv. dikke winterjas bij 25 gr) een zetje omlaag.
         if (banden.length) s += dektWeer ? 12 : -12;
-        // Bij regen: waterbestendige schoenen boven kwetsbare (leren) schoenen.
-        if (regent && eis.rol === "schoenen") s += it.regenOk === false ? -15 : 8;
+      }
+      // Bij regen: waterbestendige/regenvriendelijke stukken boven kwetsbare
+      // varianten (suède, linnen) — voor élk onderdeel van de outfit, niet
+      // alleen schoenen en jas. Geldt al vanaf een matige kans (30%+).
+      if (regenkans >= 30) {
+        s += it.regenOk === false ? -15 : 8;
       }
 
       // Combinatie-regels t.o.v. de al gekozen stukken (dit is de nieuwe kern):
@@ -809,6 +875,7 @@ export default function GarderobeApp() {
   const [nieuw, setNieuw] = useState({
     naam: "", merk: "", categorie: "top", laag: "basis", pasvorm: "regular",
     kleuren: ["navy"], patroon: false, tempBanden: [...ALLE_BANDEN], stijl: "Modern preppy", maxDraag: 1,
+    regenOk: true, regenOkAangepast: false,
   });
   const eersteOpslag = useRef(true);
 
@@ -1159,12 +1226,16 @@ export default function GarderobeApp() {
       vies: false,
       draagTeller: 0,
       maxDraag: Number(nieuw.maxDraag) || 1,
-      regenOk: true,
+      // Is regenOk niet expliciet aangepast in het formulier (nog steeds de
+      // standaardwaarde), dan gokken we op basis van de naam. Heeft de
+      // gebruiker het vinkje zelf omgezet, dan respecteren we die keuze.
+      regenOk: nieuw.regenOkAangepast ? nieuw.regenOk : afleidRegenOk(nieuw.naam),
       laag: nieuw.categorie === "top" ? nieuw.laag : undefined,
     };
+    delete kaal.regenOkAangepast;
     kaal.seizoenen = afleidSeizoenen(kaal);
     setItems((prev) => [...prev, kaal]);
-    setNieuw((n) => ({ ...n, naam: "", merk: "" }));
+    setNieuw((n) => ({ ...n, naam: "", merk: "", regenOk: true, regenOkAangepast: false }));
   }
 
   function verwijder(id) {
@@ -1215,6 +1286,10 @@ export default function GarderobeApp() {
 
   function wijzigLaag(itemId, laag) {
     setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, laag } : it)));
+  }
+
+  function wisselRegenOk(itemId) {
+    setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, regenOk: !it.regenOk } : it)));
   }
 
   function wisselKleur(itemId, kleurId) {
@@ -1591,6 +1666,10 @@ export default function GarderobeApp() {
     das: {
       omtrek: "M20 7 H28 L26.6 12.5 L30 31.5 L24 40 L18 31.5 L21.4 12.5 Z",
       details: ["M21.4 12.5 H26.6"],
+    },
+    paraplu: {
+      omtrek: "M6 22 C6 12.5 14 6 24 6 C34 6 42 12.5 42 22 C39.5 19.5 36.5 18 33.5 20 C31 22 29.5 22 27 20 C24.5 18 23.5 18 21 20 C18.5 22 17 22 14.5 20 C11.5 18 8.5 19.5 6 22 Z",
+      details: ["M24 6 V33 C24 37 20.5 38.5 18 36.5", "M20.5 3.5 H27.5"],
     },
   };
 
@@ -2385,6 +2464,14 @@ export default function GarderobeApp() {
                   <input type="checkbox" checked={nieuw.patroon} onChange={(e) => setNieuw({ ...nieuw, patroon: e.target.checked })} />
                   Opvallend patroon
                 </label>
+                <label className="flex items-center gap-1.5 text-sm px-2" style={{ color: KLEUREN.grijs }} title="Kan dit stuk tegen een buitje? Wordt bij regen liever gekozen dan kwetsbare stoffen zoals suède of linnen.">
+                  <input
+                    type="checkbox"
+                    checked={nieuw.regenOkAangepast ? nieuw.regenOk : afleidRegenOk(nieuw.naam)}
+                    onChange={(e) => setNieuw({ ...nieuw, regenOk: e.target.checked, regenOkAangepast: true })}
+                  />
+                  Waterbestendig
+                </label>
                 <label className="flex items-center gap-1 text-sm px-2" style={{ color: KLEUREN.grijs }}>
                   Vies na
                   <input
@@ -2753,6 +2840,7 @@ export default function GarderobeApp() {
                             </span>
                             <span className="block text-xs capitalize" style={{ color: KLEUREN.groen }}>
                               {seizoenTekst(it.seizoenen)} · {tempTekst(it.tempBanden)}
+                              {it.regenOk === false && <span style={{ color: KLEUREN.bordeaux }}> · kwetsbaar bij regen</span>}
                             </span>
                           </span>
                           <button
@@ -2911,6 +2999,22 @@ export default function GarderobeApp() {
                                     </button>
                                   );
                                 })}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-xs mr-1" style={{ color: KLEUREN.grijs }}>Bij regen:</span>
+                                <button
+                                  onClick={() => wisselRegenOk(it.id)}
+                                  className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
+                                  style={{
+                                    background: it.regenOk !== false ? KLEUREN.navy : KLEUREN.wit,
+                                    color: it.regenOk !== false ? KLEUREN.ivoor : KLEUREN.bordeaux,
+                                    border: `1.5px solid ${it.regenOk !== false ? KLEUREN.navy : "#EBCDC4"}`,
+                                  }}
+                                  title="Kan dit stuk tegen een buitje, of is het kwetsbaar (suède, linnen)?"
+                                >
+                                  {it.regenOk !== false ? <Check size={11} /> : <AlertTriangle size={11} />}
+                                  {it.regenOk !== false ? "Waterbestendig" : "Kwetsbaar bij regen"}
+                                </button>
                               </div>
                             </div>
                           )}
