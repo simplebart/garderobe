@@ -363,22 +363,26 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
     // er anders niks schoons overblijft, mag een recent stuk terugkomen.
     const nietRecent = basis.filter((it) => !vermijden.has(it.id));
     const kern = nietRecent.length ? nietRecent : basis;
+
+    // Regen telt mee voor schoenen, jas, broek én basislaag, al vanaf een
+    // matige kans (30%+). BELANGRIJK: dit moet even zwaar (of zwaarder)
+    // wegen dan stijlvoorkeur — anders wint "juiste stijl" altijd van
+    // "regenveilig" zodra er toevallig maar één stijl-passend stuk is, en dat
+    // is precies hoe een kwetsbaar linnen hemd bij regen toch gekozen werd.
+    const regenRelevant = ["schoenen", "jas", "broek", "top"].includes(categorie);
+    const regenVeilig = (it) => !regenRelevant || !regenSpeeltMee || it.regenOk !== false;
+
+    // Vier lagen, van meest naar minst ideaal: (1) juiste stijl én regenveilig,
+    // (2) regenveilig ongeacht stijl, (3) juiste stijl ongeacht regen,
+    // (4) alles. Zo wint regenveiligheid het van stijl zodra het regent, maar
+    // valt de app nooit stil als er niets ideaals voorhanden is.
     const lagen = [
+      kern.filter((it) => it.stijl === stijl && regenVeilig(it)),
+      kern.filter((it) => regenVeilig(it)),
       kern.filter((it) => it.stijl === stijl),
       kern,
     ];
-    for (const laag of lagen) {
-      // Regen telt nu mee voor zowel schoenen als jas, en al vanaf een
-      // matige kans (30%+) — niet pas bij een harde knip van 50%. Het is een
-      // voorkeur mét terugval: is er niets regenbestendigs, dan liever toch
-      // iets aan dan een lege categorie.
-      const regenRelevant = ["schoenen", "jas", "broek", "top"].includes(categorie);
-      let pool = laag;
-      if (regenRelevant && regenSpeeltMee) {
-        const regenbestendig = laag.filter((it) => it.regenOk !== false);
-        pool = regenbestendig.length ? regenbestendig : laag;
-      }
-      const bruikbaar = pool.length ? pool : laag;
+    for (const bruikbaar of lagen) {
       if (bruikbaar.length) {
         // Kies het stuk dat het minst vaak in dit plan is voorgekomen, zodat
         // de garderobe gelijkmatig rouleert i.p.v. steeds dezelfde favoriet.
@@ -438,15 +442,20 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
 
   // Een jas komt erbij bij kou, óf al bij een kléine kans op regen (20%+) —
   // liever een jas te veel (die trek je zo weer uit) dan een keer nat worden.
-  // Wélke jas gekozen wordt, houdt hierboven (in kies()) al rekening met
-  // regenbestendigheid, dus op een regenachtige dag krijgt een echte
+  // "verplicht" (laatste argument) is hier bewust true: hebben we eenmaal
+  // besloten dat er een jas bij moet, dan geven we er ook echt een, desnoods
+  // de qua temperatuur dichtstbijzijnde — anders verdween de jas stilletjes
+  // op een warme regendag als je enige jas voor kouder weer geconfigureerd
+  // stond. Wélke jas gekozen wordt, houdt hierboven (in kies()) al rekening
+  // met regenbestendigheid, dus op een regenachtige dag krijgt een echte
   // regenjas voorrang boven een kwetsbare variant.
   const jas =
     dag.temp < 15 || dag.regenkans >= 20
       ? kiesMetVoorkeur(
           "jas",
           () => true,
-          (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) && !(regenSpeeltMee && it.regenOk === false)
+          (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) && !(regenSpeeltMee && it.regenOk === false),
+          true
         )
       : undefined;
 
