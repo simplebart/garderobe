@@ -436,12 +436,13 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
     true
   );
 
-  // Een jas komt erbij bij kou, óf bij een reële kans op regen — dat laatste
-  // hoefde voorheen pas bij 50%+, terwijl je op een milde dag met 40% kans
-  // ook al een lichte laag tegen een bui wilt. Wélke jas gekozen wordt, houdt
-  // hierboven (in kies()) al rekening met regenbestendigheid.
+  // Een jas komt erbij bij kou, óf al bij een kléine kans op regen (20%+) —
+  // liever een jas te veel (die trek je zo weer uit) dan een keer nat worden.
+  // Wélke jas gekozen wordt, houdt hierboven (in kies()) al rekening met
+  // regenbestendigheid, dus op een regenachtige dag krijgt een echte
+  // regenjas voorrang boven een kwetsbare variant.
   const jas =
-    dag.temp < 15 || dag.regenkans >= 40
+    dag.temp < 15 || dag.regenkans >= 20
       ? kiesMetVoorkeur(
           "jas",
           () => true,
