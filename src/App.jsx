@@ -414,8 +414,14 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
     alleenOverlaag = true;
   }
 
+  // Bij regen voelt dezelfde temperatuur kouder aan (wind, vocht onttrekt
+  // warmte) — een jas alleen houdt het water tegen maar isoleert niet altijd
+  // genoeg. Daarom schuift de trui-drempel bij een flinke regenkans (30%+)
+  // fors op, van 14° naar 23° (dus tot en met 22° inclusief) — 22° met een
+  // fikse bui voelt nog steeds fris genoeg voor een extra laag onder de jas.
+  const truiDrempel = regenSpeeltMee ? 23 : 14;
   const overlaag =
-    !alleenOverlaag && dag.temp < 14
+    !alleenOverlaag && dag.temp < truiDrempel
       ? kiesMetVoorkeur(
           "top",
           (it) => it.laag === "over",
