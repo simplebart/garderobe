@@ -428,7 +428,8 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
           (it) =>
             !kleurenBotsen(it.kleuren, basislaag?.kleuren) &&
             !(it.patroon && basislaag?.patroon) &&
-            !(regenSpeeltMee && it.regenOk === false)
+            !(regenSpeeltMee && it.regenOk === false),
+          true
         )
       : undefined;
 
