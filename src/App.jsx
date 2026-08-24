@@ -288,7 +288,7 @@ const pasvormOk = (bovenRuim, broek) => !(bovenRuim && (broek.pasvorm || "regula
 // clash-lijst tussen beide voorkomt. Meerkleurige stukken krijgen
 // vrijstelling van de zelfde-kleur-regel: navy/witte streep op een navy
 // chino is juist klassiek. "Anders / gemengd" botst nooit.
-const KLEUR_CLASHES = [["navy", "zwart"], ["bruin", "zwart"]];
+const KLEUR_CLASHES = [["navy", "zwart"], ["bruin", "zwart"], ["blauw", "groen"]];
 const kleurenBotsen = (a, b) => {
   const A = (Array.isArray(a) ? a : [a]).filter((k) => k && k !== "anders");
   const B = (Array.isArray(b) ? b : [b]).filter((k) => k && k !== "anders");
@@ -341,7 +341,7 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
     );
   };
 
-  const kies = (categorie, extraFilter = () => true, verplicht = false) => {
+  const kies = (categorie, extraFilter = () => true, verplicht = false, voorkeurFn = () => true) => {
     const beschikbaar = items.filter(
       (it) =>
         it.categorie === categorie &&
@@ -350,9 +350,10 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
         extraFilter(it)
     );
     // Temperatuur: normaal moet het item de dagband dekken. Bij een verplicht
-    // onderdeel (broek/basislaag/schoenen) mag dat losgelaten worden als er
-    // anders niets is — dan pakken we de items die qua temperatuur het dichtst
-    // in de buurt komen, zodat er altijd iets aan kan.
+    // onderdeel (broek/basislaag/schoenen/jas/overlaag-indien-nodig) mag dat
+    // losgelaten worden als er anders niets is — dan pakken we de items die
+    // qua temperatuur het dichtst in de buurt komen, zodat er altijd iets
+    // aan kan.
     const inBand = beschikbaar.filter((it) => (it.tempBanden || ALLE_BANDEN).includes(dagBand));
     let basis = inBand;
     if (!inBand.length && verplicht && beschikbaar.length) {
@@ -364,22 +365,24 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
     const nietRecent = basis.filter((it) => !vermijden.has(it.id));
     const kern = nietRecent.length ? nietRecent : basis;
 
-    // Regen telt mee voor schoenen, jas, broek én basislaag, al vanaf een
-    // matige kans (30%+). BELANGRIJK: dit moet even zwaar (of zwaarder)
-    // wegen dan stijlvoorkeur — anders wint "juiste stijl" altijd van
-    // "regenveilig" zodra er toevallig maar één stijl-passend stuk is, en dat
-    // is precies hoe een kwetsbaar linnen hemd bij regen toch gekozen werd.
     const regenRelevant = ["schoenen", "jas", "broek", "top"].includes(categorie);
     const regenVeilig = (it) => !regenRelevant || !regenSpeeltMee || it.regenOk !== false;
+    const stijlVeilig = (it) => it.stijl === stijl;
 
-    // Vier lagen, van meest naar minst ideaal: (1) juiste stijl én regenveilig,
-    // (2) regenveilig ongeacht stijl, (3) juiste stijl ongeacht regen,
-    // (4) alles. Zo wint regenveiligheid het van stijl zodra het regent, maar
-    // valt de app nooit stil als er niets ideaals voorhanden is.
+    // Drie zachte criteria — kleur/patroon (voorkeurFn), regen, en stijl —
+    // worden geprobeerd van "alles tegelijk" tot "niets meer", in vaste
+    // volgorde van belangrijkheid: kleur/patroon gaat het laatst overboord,
+    // dan pas stijl, dan pas regen. Zo blijft een botsende combinatie (zoals
+    // blauw op groen, of een hemd over een hemd) een allerlaatste redmiddel
+    // in plaats van iets dat zomaar kan gebeuren zodra één ander criterium
+    // (bijvoorbeeld regen) niet perfect uitkomt.
     const lagen = [
-      kern.filter((it) => it.stijl === stijl && regenVeilig(it)),
+      kern.filter((it) => voorkeurFn(it) && regenVeilig(it) && stijlVeilig(it)),
+      kern.filter((it) => voorkeurFn(it) && regenVeilig(it)),
+      kern.filter((it) => voorkeurFn(it)),
+      kern.filter((it) => regenVeilig(it) && stijlVeilig(it)),
       kern.filter((it) => regenVeilig(it)),
-      kern.filter((it) => it.stijl === stijl),
+      kern.filter((it) => stijlVeilig(it)),
       kern,
     ];
     for (const bruikbaar of lagen) {
@@ -404,8 +407,15 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
     return null;
   };
 
-  const kiesMetVoorkeur = (categorie, hard, voorkeur, verplicht = false) =>
-    kies(categorie, (it) => hard(it) && voorkeur(it), verplicht) || kies(categorie, hard, verplicht);
+  // Een polo, hemd of t-shirt is een basislaag-kledingstuk — die trek je
+  // nooit als "extra laag" over een andere top heen. Alleen echte
+  // laagstukken (trui, vest, hoodie) komen in aanmerking als overlaag, ook
+  // al zou een item per ongeluk als laag "over" gemarkeerd staan.
+  const NIET_ALS_OVERLAAG = ["polo", "hemd", "overhemd", "blouse", "t-shirt", "tshirt"];
+  const isEchteOverlaag = (it) => {
+    const n = (it.naam || "").toLowerCase();
+    return !NIET_ALS_OVERLAAG.some((w) => n.includes(w));
+  };
 
   let basislaag = kies("top", (it) => (it.laag || "basis") === "basis", true);
   let alleenOverlaag = false;
@@ -422,14 +432,11 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
   const truiDrempel = regenSpeeltMee ? 23 : 14;
   const overlaag =
     !alleenOverlaag && dag.temp < truiDrempel
-      ? kiesMetVoorkeur(
+      ? kies(
           "top",
-          (it) => it.laag === "over",
-          (it) =>
-            !kleurenBotsen(it.kleuren, basislaag?.kleuren) &&
-            !(it.patroon && basislaag?.patroon) &&
-            !(regenSpeeltMee && it.regenOk === false),
-          true
+          (it) => it.laag === "over" && isEchteOverlaag(it),
+          true,
+          (it) => !kleurenBotsen(it.kleuren, basislaag?.kleuren) && !(it.patroon && basislaag?.patroon)
         )
       : undefined;
 
@@ -437,32 +444,28 @@ function genereerDag(items, dag, stijl, vermijden = new Set(), gebruikTeller = n
   const patronenBoven = [basislaag, overlaag].filter((it) => it?.patroon).length;
 
   const bovenRuim = [basislaag, overlaag].filter(Boolean).some((it) => (it.pasvorm || "regular") === "ruim");
-  const broek = kiesMetVoorkeur(
+  const broek = kies(
     "broek",
     (it) => pasvormOk(bovenRuim, it),
-    (it) =>
-      !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) &&
-      !(it.patroon && patronenBoven >= 1) &&
-      !(regenSpeeltMee && it.regenOk === false),
-    true
+    true,
+    (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) && !(it.patroon && patronenBoven >= 1)
   );
 
   // Een jas komt erbij bij kou, óf al bij een kléine kans op regen (20%+) —
   // liever een jas te veel (die trek je zo weer uit) dan een keer nat worden.
-  // "verplicht" (laatste argument) is hier bewust true: hebben we eenmaal
+  // "verplicht" (derde argument) is hier bewust true: hebben we eenmaal
   // besloten dat er een jas bij moet, dan geven we er ook echt een, desnoods
   // de qua temperatuur dichtstbijzijnde — anders verdween de jas stilletjes
   // op een warme regendag als je enige jas voor kouder weer geconfigureerd
-  // stond. Wélke jas gekozen wordt, houdt hierboven (in kies()) al rekening
-  // met regenbestendigheid, dus op een regenachtige dag krijgt een echte
-  // regenjas voorrang boven een kwetsbare variant.
+  // stond. Wélke jas gekozen wordt, houdt via kies() al rekening met
+  // regenbestendigheid en kleur, met kleur als laatst-op-te-geven criterium.
   const jas =
     dag.temp < 15 || dag.regenkans >= 20
-      ? kiesMetVoorkeur(
+      ? kies(
           "jas",
           () => true,
-          (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren) && !(regenSpeeltMee && it.regenOk === false),
-          true
+          true,
+          (it) => !kleurenBotsen(it.kleuren, buitensteTop?.kleuren)
         )
       : undefined;
 
